@@ -1,0 +1,54 @@
+menu "Arctic Simulator Configuration"
+
+    config SIMULATOR_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+        help
+            SSID of the WiFi network to connect to.
+
+    config SIMULATOR_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        help
+            Password for the WiFi network.
+
+    config SIMULATOR_MDNS_HOSTNAME
+        string "mDNS Hostname"
+        default "arctic-sim"
+        help
+            mDNS hostname (accessible as arctic-sim.local).
+
+    config SIMULATOR_RS485_TX_PIN
+        int "RS-485 TX GPIO"
+        default 6
+        help
+            GPIO pin for RS-485 TX. Default 6 for Atom S3 + RS485 base.
+
+    config SIMULATOR_RS485_RX_PIN
+        int "RS-485 RX GPIO"
+        default 5
+        help
+            GPIO pin for RS-485 RX. Default 5 for Atom S3 + RS485 base.
+
+    config SIMULATOR_RS485_DIR_PIN
+        int "RS-485 Direction GPIO (-1 for auto)"
+        default -1
+        help
+            GPIO pin for RS-485 direction control (RTS).
+            Set to -1 if the RS-485 adapter handles direction automatically.
+
+    config SIMULATOR_UART_PORT
+        int "UART Port Number"
+        default 1
+        range 0 2
+        help
+            UART port number for Modbus communication.
+
+    config SIMULATOR_MODBUS_SLAVE_ADDR
+        int "Modbus Slave Address"
+        default 1
+        range 1 247
+        help
+            Modbus slave address. The Arctic heat pump uses address 1.
+
+endmenu

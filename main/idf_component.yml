@@ -1,0 +1,5 @@
+dependencies:
+  espressif/esp-modbus:
+    version: "^1.0"
+  espressif/mdns:
+    version: "^1.0"
