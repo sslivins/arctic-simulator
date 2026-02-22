@@ -53,9 +53,10 @@ stand-in for the real heat pump during development and integration testing of th
 | `main/` | All application source code |
 | `main/register_map.h/cpp` | Register storage (holding 2000–2057, input 2100–2138), presets |
 | `main/modbus_slave.h/cpp` | Modbus RTU slave via esp_modbus, RS-485 communication |
-| `main/api_server.h/cpp` | REST API endpoints (register control, presets, playback) |
+| `main/api_server.h/cpp` | REST API endpoints + web dashboard serving |
 | `main/playback.h/cpp` | JSONL capture file parser and replay engine |
 | `main/wifi_manager.h/cpp` | WiFi STA mode + mDNS (arctic-sim.local) |
+| `main/web/index.html` | Web dashboard (gzipped and embedded at build time) |
 | `main/main.cpp` | Entry point, FreeRTOS task creation |
 | `main/Kconfig.projbuild` | Menuconfig options (WiFi, GPIO pins, Modbus address) |
 | `captures/` | Example JSONL capture files |
@@ -111,8 +112,8 @@ One JSON object per line:
 
 ### Hardware Configuration
 Default GPIO pins for Atom S3 + RS485 base (adjust via menuconfig):
-- TX: GPIO 6
-- RX: GPIO 5
+- TX: GPIO 19
+- RX: GPIO 22
 - DIR: -1 (auto direction control)
 - UART port: 1
 
@@ -127,6 +128,7 @@ Default GPIO pins for Atom S3 + RS485 base (adjust via menuconfig):
 
 - [ ] Keep register map in sync with `arctic-controller/docs/ARCTIC-MODBUS-PROTOCOL.md`
 - [ ] Update `README.md` if API endpoints or presets changed
+- [ ] Update `docs/openapi.yaml` when API endpoints are added, changed, or removed
 - [ ] Update example capture files if JSONL format changed
 - [ ] Verify build passes with `idf.py build`
 - [ ] Use conventional commit messages

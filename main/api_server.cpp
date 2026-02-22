@@ -27,6 +27,10 @@
 static const char* TAG = "api";
 static httpd_handle_t s_server = nullptr;
 
+// Embedded gzipped web dashboard
+extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
+extern const uint8_t index_html_gz_end[]   asm("_binary_index_html_gz_end");
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -325,6 +329,18 @@ static esp_err_t handlePlaybackStatus(httpd_req_t* req) {
 }
 
 // ============================================================================
+// GET / — Serve embedded web dashboard
+// ============================================================================
+
+static esp_err_t handleWebUI(httpd_req_t* req) {
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    size_t len = index_html_gz_end - index_html_gz_start;
+    httpd_resp_send(req, (const char*)index_html_gz_start, len);
+    return ESP_OK;
+}
+
+// ============================================================================
 // CORS preflight
 // ============================================================================
 
@@ -347,7 +363,7 @@ esp_err_t start() {
     if (s_server) return ESP_OK;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = 18;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.stack_size = 8192;
 
@@ -370,6 +386,7 @@ esp_err_t start() {
         { "/api/playback/stop",   HTTP_POST, handlePlaybackStop,  nullptr },
         { "/api/playback/status", HTTP_GET,  handlePlaybackStatus,nullptr },
         { "/api/*",               HTTP_OPTIONS, handleOptions,    nullptr },
+        { "/",                    HTTP_GET,  handleWebUI,        nullptr },
     };
 
     for (const auto& uri : uris) {

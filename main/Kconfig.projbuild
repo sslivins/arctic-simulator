@@ -20,15 +20,15 @@ menu "Arctic Simulator Configuration"
 
     config SIMULATOR_RS485_TX_PIN
         int "RS-485 TX GPIO"
-        default 6
+        default 19
         help
-            GPIO pin for RS-485 TX. Default 6 for Atom S3 + RS485 base.
+            GPIO pin for RS-485 TX. Default 19 for Atom S3 + RS485 base.
 
     config SIMULATOR_RS485_RX_PIN
         int "RS-485 RX GPIO"
-        default 5
+        default 22
         help
-            GPIO pin for RS-485 RX. Default 5 for Atom S3 + RS485 base.
+            GPIO pin for RS-485 RX. Default 22 for Atom S3 + RS485 base.
 
     config SIMULATOR_RS485_DIR_PIN
         int "RS-485 Direction GPIO (-1 for auto)"

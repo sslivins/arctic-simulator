@@ -18,4 +18,17 @@ idf_component_register(
         esp_timer
         vfs
         spiffs
+    EMBED_FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
+)
+
+# Gzip the web dashboard for embedding (ESP-IDF always has Python)
+find_package(Python3 REQUIRED)
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
+    COMMAND ${Python3_EXECUTABLE} -c
+        "import gzip,shutil; shutil.copyfileobj(open(r'${CMAKE_CURRENT_SOURCE_DIR}/web/index.html','rb'), gzip.open(r'${CMAKE_CURRENT_BINARY_DIR}/index.html.gz','wb'))"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html"
+    COMMENT "Gzipping web dashboard"
+    VERBATIM
 )

@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arctic Simulator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 16px; max-width: 800px; margin: 0 auto; }
+h1 { color: #64b5f6; font-size: 1.4em; margin-bottom: 12px; }
+h2 { color: #90caf9; font-size: 1.1em; margin: 16px 0 8px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+.card { background: #16213e; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.status-bar { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.85em; }
+.status-bar .item { display: flex; align-items: center; gap: 4px; }
+.status-bar .dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot.on { background: #4caf50; }
+.dot.off { background: #666; }
+
+/* Presets */
+.presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.presets button { padding: 10px 8px; border: 1px solid #444; border-radius: 6px; background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 0.85em; transition: all 0.15s; }
+.presets button:hover { background: #2a3a5e; border-color: #64b5f6; }
+.presets button.active { background: #1565c0; border-color: #64b5f6; color: #fff; }
+.presets button.error { border-color: #ef5350; }
+.presets button.error:hover { background: #4a1a1a; }
+.presets button.error.active { background: #c62828; }
+
+/* Toggles */
+.toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.toggle { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: #1a1a2e; border-radius: 4px; font-size: 0.85em; }
+.toggle label { cursor: pointer; user-select: none; }
+.switch { position: relative; width: 36px; height: 20px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; inset: 0; background: #444; border-radius: 20px; transition: 0.2s; }
+.slider::before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px; background: #ccc; border-radius: 50%; transition: 0.2s; }
+.switch input:checked + .slider { background: #4caf50; }
+.switch input:checked + .slider::before { transform: translateX(16px); background: #fff; }
+
+/* Value inputs */
+.values { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.val-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; background: #1a1a2e; border-radius: 4px; font-size: 0.85em; }
+.val-row input { width: 70px; padding: 4px 6px; background: #0f3460; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; text-align: right; font-size: 0.85em; }
+.val-row input:focus { outline: none; border-color: #64b5f6; }
+.val-row .unit { color: #888; font-size: 0.8em; margin-left: 4px; width: 30px; }
+
+/* Playback */
+.playback-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.playback-controls button { padding: 6px 14px; border: 1px solid #444; border-radius: 4px; background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 0.85em; }
+.playback-controls button:hover { background: #2a3a5e; }
+.playback-controls .state { font-size: 0.85em; color: #90caf9; }
+textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background: #0f3460; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; font-family: monospace; font-size: 0.8em; resize: vertical; }
+
+/* Errors */
+.error-section { display: flex; align-items: center; gap: 8px; }
+.error-section button { padding: 6px 14px; border: 1px solid #ef5350; border-radius: 4px; background: #1a1a2e; color: #ef5350; cursor: pointer; }
+.error-section button:hover { background: #4a1a1a; }
+.error-flags { font-size: 0.85em; color: #ef5350; }
+.error-flags.none { color: #4caf50; }
+
+/* Modbus stats */
+.stats { display: flex; gap: 16px; font-size: 0.85em; color: #888; }
+
+/* Toast */
+.toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 16px; border-radius: 6px; color: #fff; font-size: 0.85em; opacity: 0; transition: opacity 0.3s; z-index: 100; }
+.toast.show { opacity: 1; }
+.toast.ok { background: #2e7d32; }
+.toast.err { background: #c62828; }
+</style>
+</head>
+<body>
+
+<h1>🧊 Arctic Simulator</h1>
+
+<!-- Status -->
+<div class="card">
+  <div class="status-bar">
+    <div class="item"><span class="dot" id="dot-modbus"></span> Modbus</div>
+    <div class="item"><span class="dot" id="dot-wifi"></span> WiFi</div>
+    <div class="item" id="version-info"></div>
+  </div>
+  <div class="stats" id="modbus-stats"></div>
+</div>
+
+<!-- Presets -->
+<h2>Presets</h2>
+<div class="card">
+  <div class="presets" id="preset-buttons"></div>
+</div>
+
+<!-- System Status Toggles (register 2135) -->
+<h2>System Status</h2>
+<div class="card">
+  <div class="toggles" id="status-toggles"></div>
+</div>
+
+<!-- Temperatures & Sensors -->
+<h2>Temperatures & Sensors</h2>
+<div class="card">
+  <div class="values" id="temp-values"></div>
+</div>
+
+<!-- Electrical -->
+<h2>Electrical / Mechanical</h2>
+<div class="card">
+  <div class="values" id="elec-values"></div>
+</div>
+
+<!-- Errors -->
+<h2>Errors</h2>
+<div class="card">
+  <div class="error-section">
+    <button onclick="clearErrors()">Clear All Errors</button>
+    <span class="error-flags none" id="error-display">No errors</span>
+  </div>
+</div>
+
+<!-- Playback -->
+<h2>Playback</h2>
+<div class="card">
+  <div class="playback-controls">
+    <button onclick="startPlayback()">▶ Start</button>
+    <button onclick="stopPlayback()">⏹ Stop</button>
+    <button onclick="loadPlayback()">📂 Load</button>
+    <span class="state" id="playback-state">idle</span>
+  </div>
+  <textarea id="capture-data" placeholder="Paste JSONL capture data here..."></textarea>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const BASE = '';  // Same origin
+
+// ============================================================================
+// Presets
+// ============================================================================
+const PRESETS = [
+  { name: 'idle', label: 'Idle' },
+  { name: 'heating', label: 'Heating' },
+  { name: 'cooling', label: 'Cooling' },
+  { name: 'hot_water', label: 'Hot Water' },
+  { name: 'defrost', label: 'Defrost' },
+  { name: 'error_e01', label: 'E01', error: true },
+  { name: 'error_p01', label: 'P01', error: true },
+];
+
+let activePreset = '';
+
+function renderPresets() {
+  const el = document.getElementById('preset-buttons');
+  el.innerHTML = PRESETS.map(p =>
+    `<button class="${p.error ? 'error' : ''}" data-preset="${p.name}" onclick="loadPreset('${p.name}')">${p.label}</button>`
+  ).join('');
+}
+
+async function loadPreset(name) {
+  try {
+    const r = await fetch(BASE + '/api/preset', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name })
+    });
+    if (r.ok) {
+      activePreset = name;
+      updatePresetButtons();
+      toast('Preset: ' + name);
+      refresh();
+    } else { toast('Failed', true); }
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+function updatePresetButtons() {
+  document.querySelectorAll('.presets button').forEach(b => {
+    b.classList.toggle('active', b.dataset.preset === activePreset);
+  });
+}
+
+// ============================================================================
+// Status toggles (register 2135 bits)
+// ============================================================================
+const STATUS_BITS = [
+  { bit: 0,  label: 'Unit ON' },
+  { bit: 1,  label: 'Compressor' },
+  { bit: 2,  label: 'Fan High' },
+  { bit: 3,  label: 'Fan Med' },
+  { bit: 4,  label: 'Fan Low' },
+  { bit: 5,  label: 'Water Pump' },
+  { bit: 6,  label: '4-Way Valve' },
+  { bit: 7,  label: 'Elec Heater' },
+  { bit: 8,  label: 'Water Flow' },
+  { bit: 11, label: 'Remote ON' },
+  { bit: 13, label: '3-Way V1' },
+  { bit: 14, label: '3-Way V2' },
+];
+
+function renderToggles() {
+  const el = document.getElementById('status-toggles');
+  el.innerHTML = STATUS_BITS.map(s =>
+    `<div class="toggle">
+      <label for="sts-${s.bit}">${s.label}</label>
+      <label class="switch"><input type="checkbox" id="sts-${s.bit}" data-bit="${s.bit}" onchange="toggleStatusBit(${s.bit})"><span class="slider"></span></label>
+    </div>`
+  ).join('');
+}
+
+async function toggleStatusBit(bit) {
+  const cb = document.getElementById('sts-' + bit);
+  let val = currentRegisters['2135'] || 0;
+  if (cb.checked) val |= (1 << bit);
+  else val &= ~(1 << bit);
+  await setRegister(2135, val);
+}
+
+// ============================================================================
+// Temperature & sensor value inputs
+// ============================================================================
+const TEMP_FIELDS = [
+  { addr: 2100, label: 'Water Tank', unit: '°C', div: 10 },
+  { addr: 2102, label: 'Outlet Water', unit: '°C', div: 10 },
+  { addr: 2103, label: 'Inlet Water', unit: '°C', div: 10 },
+  { addr: 2104, label: 'Discharge', unit: '°C', div: 10 },
+  { addr: 2105, label: 'Suction', unit: '°C', div: 10 },
+  { addr: 2107, label: 'Outdoor Coil', unit: '°C', div: 10 },
+  { addr: 2108, label: 'Indoor Coil', unit: '°C', div: 10 },
+  { addr: 2110, label: 'Outdoor Ambient', unit: '°C', div: 10 },
+  { addr: 2114, label: 'IPM Temp', unit: '°C', div: 10 },
+];
+
+const ELEC_FIELDS = [
+  { addr: 2118, label: 'Compressor Freq', unit: 'Hz', div: 1 },
+  { addr: 2119, label: 'Fan Speed', unit: 'RPM', div: 1 },
+  { addr: 2120, label: 'AC Voltage', unit: 'V', div: 1 },
+  { addr: 2121, label: 'AC Current', unit: 'A', div: 1 },
+  { addr: 2122, label: 'DC Voltage', unit: 'V', div: 10 },
+  { addr: 2124, label: 'Primary EEV', unit: 'stp', div: 1 },
+  { addr: 2126, label: 'High Pressure', unit: 'MPa', div: 100 },
+  { addr: 2127, label: 'Low Pressure', unit: 'MPa', div: 100 },
+];
+
+function renderValues(fields, containerId) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = fields.map(f =>
+    `<div class="val-row">
+      <span>${f.label}</span>
+      <div><input type="number" id="val-${f.addr}" data-addr="${f.addr}" data-div="${f.div}"
+        step="${f.div > 1 ? '0.1' : '1'}"
+        onchange="onValueChange(${f.addr}, ${f.div})"
+        ><span class="unit">${f.unit}</span></div>
+    </div>`
+  ).join('');
+}
+
+async function onValueChange(addr, div) {
+  const input = document.getElementById('val-' + addr);
+  const raw = Math.round(parseFloat(input.value) * div);
+  await setRegister(addr, raw);
+}
+
+// ============================================================================
+// Register I/O
+// ============================================================================
+let currentRegisters = {};
+
+async function setRegister(addr, value) {
+  try {
+    const r = await fetch(BASE + '/api/registers?addr=' + addr, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ value: value })
+    });
+    if (r.ok) {
+      currentRegisters[String(addr)] = value;
+      activePreset = '';
+      updatePresetButtons();
+    } else { toast('Failed to set register', true); }
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+async function refresh() {
+  try {
+    // Fetch status
+    const statusResp = await fetch(BASE + '/api/status');
+    if (statusResp.ok) {
+      const s = await statusResp.json();
+      document.getElementById('dot-modbus').className = 'dot ' + (s.modbus_active ? 'on' : 'off');
+      document.getElementById('dot-wifi').className = 'dot on';
+      document.getElementById('version-info').textContent = s.version;
+      document.getElementById('modbus-stats').textContent =
+        `R: ${s.modbus_stats.reads}  W: ${s.modbus_stats.writes}  E: ${s.modbus_stats.errors}`;
+      document.getElementById('playback-state').textContent =
+        `${s.playback.state} (${s.playback.position}/${s.playback.entries})`;
+    }
+
+    // Fetch registers
+    const regResp = await fetch(BASE + '/api/registers');
+    if (regResp.ok) {
+      const data = await regResp.json();
+      currentRegisters = { ...data.holding, ...data.input };
+      updateUI();
+    }
+  } catch(e) {
+    document.getElementById('dot-wifi').className = 'dot off';
+  }
+}
+
+function updateUI() {
+  // Status toggles
+  const sts2 = currentRegisters['2135'] || 0;
+  STATUS_BITS.forEach(s => {
+    const cb = document.getElementById('sts-' + s.bit);
+    if (cb) cb.checked = !!(sts2 & (1 << s.bit));
+  });
+
+  // Temperature values
+  [...TEMP_FIELDS, ...ELEC_FIELDS].forEach(f => {
+    const input = document.getElementById('val-' + f.addr);
+    if (input && document.activeElement !== input) {
+      const raw = currentRegisters[String(f.addr)] || 0;
+      input.value = f.div > 1 ? (raw / f.div).toFixed(1) : raw;
+    }
+  });
+
+  // Error display
+  const e1 = currentRegisters['2134'] || 0;
+  const e2 = currentRegisters['2137'] || 0;
+  const e3 = currentRegisters['2138'] || 0;
+  const errEl = document.getElementById('error-display');
+  if (e1 || e2 || e3) {
+    const codes = [];
+    if (e2 & (1<<6)) codes.push('E01');
+    if (e2 & (1<<5)) codes.push('E05');
+    if (e2 & (1<<7)) codes.push('E09');
+    if (e2 & (1<<3)) codes.push('E18');
+    if (e2 & (1<<2)) codes.push('E19');
+    if (e1 & (1<<3)) codes.push('E20');
+    if (e2 & (1<<8)) codes.push('E22');
+    if (e3 & (1<<8)) codes.push('P01');
+    if (e3 & (1<<6)) codes.push('P02');
+    if (e3 & (1<<5)) codes.push('P11');
+    if (e3 & (1<<0)) codes.push('P19');
+    if (e2 & (1<<13)) codes.push('r01');
+    if (e3 & (1<<2)) codes.push('FA');
+    if (codes.length === 0) codes.push(`raw: ${e1}/${e2}/${e3}`);
+    errEl.textContent = codes.join(', ');
+    errEl.className = 'error-flags';
+  } else {
+    errEl.textContent = 'No errors';
+    errEl.className = 'error-flags none';
+  }
+}
+
+// ============================================================================
+// Error control
+// ============================================================================
+async function clearErrors() {
+  try {
+    await fetch(BASE + '/api/errors/clear', { method: 'POST' });
+    toast('Errors cleared');
+    refresh();
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+// ============================================================================
+// Playback
+// ============================================================================
+async function loadPlayback() {
+  const data = document.getElementById('capture-data').value.trim();
+  if (!data) { toast('Paste capture data first', true); return; }
+  try {
+    const r = await fetch(BASE + '/api/playback/load', {
+      method: 'POST', headers: {'Content-Type': 'text/plain'}, body: data
+    });
+    if (r.ok) {
+      const j = await r.json();
+      toast(`Loaded ${j.entries} entries`);
+      refresh();
+    } else { toast('Failed to load', true); }
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+async function startPlayback() {
+  try {
+    const r = await fetch(BASE + '/api/playback/start', { method: 'POST' });
+    if (r.ok) { toast('Playback started'); refresh(); }
+    else { toast('Failed — load capture first', true); }
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+async function stopPlayback() {
+  try {
+    await fetch(BASE + '/api/playback/stop', { method: 'POST' });
+    toast('Playback stopped');
+    refresh();
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+// ============================================================================
+// Toast
+// ============================================================================
+function toast(msg, isError) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (isError ? 'err' : 'ok');
+  setTimeout(() => el.className = 'toast', 2000);
+}
+
+// ============================================================================
+// Init
+// ============================================================================
+renderPresets();
+renderToggles();
+renderValues(TEMP_FIELDS, 'temp-values');
+renderValues(ELEC_FIELDS, 'elec-values');
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
