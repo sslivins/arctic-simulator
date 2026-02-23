@@ -5,8 +5,12 @@ info:
     REST API for the Arctic Heat Pump Simulator.
     Controls simulated Modbus register values, presets, and capture playback.
 
-    Temperature values are in whole degrees Celsius (e.g. 45 = 45°C),
-    stored as signed int16. Negative values use two's complement.
+    Temperature register values are in whole degrees Celsius per the
+    protocol specification (no scaling documented). Negative temperature
+    encoding is TBD pending real device captures.
+
+    DC voltage (reg 2122) uses ÷10, pressure (regs 2126-2127) uses ÷100,
+    as documented in the protocol.
   version: 0.1.0
   contact:
     name: Arctic Simulator
