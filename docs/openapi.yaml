@@ -11,7 +11,7 @@ info:
 
     DC voltage (reg 2122) uses ÷10, pressure (regs 2126-2127) uses ÷100,
     as documented in the protocol.
-  version: 0.1.0
+  version: 0.2.0
   contact:
     name: Arctic Simulator
     url: https://github.com/sslivins/arctic-simulator
@@ -316,7 +316,7 @@ components:
           example: arctic-simulator
         version:
           type: string
-          example: 0.1.0
+          example: 0.2.0
         modbus_active:
           type: boolean
           example: true

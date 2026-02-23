@@ -226,7 +226,7 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
 
     cJSON* json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "firmware", "arctic-simulator");
-    cJSON_AddStringToObject(json, "version", "0.1.0");
+    cJSON_AddStringToObject(json, "version", "0.2.0");
     cJSON_AddBoolToObject(json, "modbus_active", mb_slave::isInitialized());
 
     cJSON* mb = cJSON_AddObjectToObject(json, "modbus_stats");
