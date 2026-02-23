@@ -3,7 +3,8 @@
  *
  * Endpoints:
  *   GET  /api/status                — Simulator status + Modbus stats
- *   GET  /api/registers             — All register values
+ *   GET  /api/heatpump              — Abstracted heat pump state
+ *   GET  /api/registers             — All register values (raw)
  *   GET  /api/registers?addr=XXXX   — Single register
  *   PUT  /api/registers?addr=XXXX   — Set single register { "value": N }
  *   POST /api/registers/bulk        — Set multiple registers { "registers": { "2100": 350, ... } }
@@ -48,6 +49,58 @@ static esp_err_t handleDashboard(httpd_req_t* req) {
 // Helpers
 // ============================================================================
 
+static const char* modeToString(uint16_t mode) {
+    switch (mode) {
+    case reg::MODE_COOLING:       return "cooling";
+    case reg::MODE_FLOOR_HEATING: return "floor_heating";
+    case reg::MODE_FAN_COIL_HEAT: return "fan_coil_heating";
+    case reg::MODE_HOT_WATER:     return "hot_water";
+    case reg::MODE_AUTO:          return "auto";
+    default:                      return "unknown";
+    }
+}
+
+static const char* fanSpeedString(uint16_t sts2) {
+    if (sts2 & reg::STS2_FAN_HIGH) return "high";
+    if (sts2 & reg::STS2_FAN_MED)  return "medium";
+    if (sts2 & reg::STS2_FAN_LOW)  return "low";
+    return "off";
+}
+
+static void addActiveErrors(cJSON* arr, uint16_t ec1, uint16_t ec2, uint16_t ec3) {
+    // Error Code 1 (register 2134) — brine/tank sensor errors
+    const char* ec1_names[] = {
+        "brine_inlet_sensor", "brine_outlet_sensor", "brine_flow_protection", "tank_sensor"
+    };
+    for (int i = 0; i < 4; i++) {
+        if (ec1 & (1 << i)) cJSON_AddItemToArray(arr, cJSON_CreateString(ec1_names[i]));
+    }
+
+    // Error Code 2 (register 2137) — sensor/communication errors
+    const char* ec2_names[] = {
+        "indoor_ee", "outdoor_ee", "inlet_water_sensor", "outlet_water_sensor",
+        "antifreeze_protection", "external_coil_sensor", "discharge_sensor",
+        "suction_sensor", "ambient_sensor", "drive_board_comm",
+        "wired_controller_comm", "compressor_abnormal", "indoor_outdoor_comm",
+        "ipm_error", "high_outlet_temp", "high_pressure"
+    };
+    for (int i = 0; i < 16; i++) {
+        if (ec2 & (1 << i)) cJSON_AddItemToArray(arr, cJSON_CreateString(ec2_names[i]));
+    }
+
+    // Error Code 3 (register 2138) — protection errors
+    const char* ec3_names[] = {
+        "low_pressure", "discharge_overtemp", "outdoor_ambient_sensor",
+        "suction_overtemp", "compressor_overcurrent", "dc_bus_overvoltage",
+        "phase_loss", "ipm_overtemp", "fan_motor_error", "compressor_phase_error",
+        "eev_sensor", "outdoor_comm", "water_flow_protection",
+        "compressor_freq_limit", "dc_bus_undervoltage", "ac_overcurrent"
+    };
+    for (int i = 0; i < 16; i++) {
+        if (ec3 & (1 << i)) cJSON_AddItemToArray(arr, cJSON_CreateString(ec3_names[i]));
+    }
+}
+
 static esp_err_t sendJson(httpd_req_t* req, cJSON* json) {
     char* str = cJSON_PrintUnformatted(json);
     httpd_resp_set_type(req, "application/json");
@@ -86,6 +139,84 @@ static char* readBody(httpd_req_t* req) {
 }
 
 // ============================================================================
+// GET /api/heatpump — abstracted heat pump state
+// ============================================================================
+
+static esp_err_t handleGetHeatpump(httpd_req_t* req) {
+    uint16_t sts2 = reg::get(reg::STATUS_2);
+    uint16_t sts3 = reg::get(reg::STATUS_3);
+
+    cJSON* json = cJSON_CreateObject();
+
+    // --- Power & operating mode ---
+    cJSON_AddBoolToObject(json, "unit_on", (sts2 & reg::STS2_UNIT_ON) != 0);
+    cJSON_AddStringToObject(json, "mode", modeToString(reg::get(reg::WORKING_MODE)));
+    cJSON_AddNumberToObject(json, "mode_raw", reg::get(reg::WORKING_MODE));
+
+    // --- Setpoints (commanded by controller) ---
+    cJSON* sp = cJSON_AddObjectToObject(json, "setpoints");
+    cJSON_AddNumberToObject(sp, "cooling", reg::get(reg::COOLING_SETPOINT));
+    cJSON_AddNumberToObject(sp, "heating", reg::get(reg::HEATING_SETPOINT));
+    cJSON_AddNumberToObject(sp, "hot_water", reg::get(reg::HOT_WATER_SETPOINT));
+
+    // --- Temperatures ---
+    cJSON* temps = cJSON_AddObjectToObject(json, "temperatures");
+    cJSON_AddNumberToObject(temps, "outlet_water", reg::get(reg::OUTLET_WATER_TEMP));
+    cJSON_AddNumberToObject(temps, "inlet_water", reg::get(reg::INLET_WATER_TEMP));
+    cJSON_AddNumberToObject(temps, "water_tank", reg::get(reg::WATER_TANK_TEMP));
+    cJSON_AddNumberToObject(temps, "outdoor_ambient", reg::get(reg::OUTDOOR_AMBIENT_TEMP));
+    cJSON_AddNumberToObject(temps, "discharge", reg::get(reg::DISCHARGE_TEMP));
+    cJSON_AddNumberToObject(temps, "suction", reg::get(reg::SUCTION_TEMP));
+    cJSON_AddNumberToObject(temps, "outdoor_coil", reg::get(reg::OUTDOOR_COIL_TEMP));
+    cJSON_AddNumberToObject(temps, "indoor_coil", reg::get(reg::INDOOR_COIL_TEMP));
+    cJSON_AddNumberToObject(temps, "ipm", reg::get(reg::IPM_TEMP));
+
+    // --- Compressor & electrical ---
+    cJSON* comp = cJSON_AddObjectToObject(json, "compressor");
+    cJSON_AddBoolToObject(comp, "running", (sts2 & reg::STS2_COMPRESSOR) != 0);
+    cJSON_AddNumberToObject(comp, "frequency", reg::get(reg::COMPRESSOR_FREQ));
+    cJSON_AddNumberToObject(comp, "phase_current", reg::get(reg::COMP_PHASE_CURRENT));
+
+    cJSON* elec = cJSON_AddObjectToObject(json, "electrical");
+    cJSON_AddNumberToObject(elec, "ac_voltage", reg::get(reg::AC_VOLTAGE));
+    cJSON_AddNumberToObject(elec, "ac_current", reg::get(reg::AC_CURRENT));
+    // DC voltage stored as raw × 10 — convert to actual volts
+    cJSON_AddNumberToObject(elec, "dc_voltage", reg::get(reg::DC_VOLTAGE) / 10.0);
+
+    // --- Pressure (stored as raw × 100 — convert to MPa) ---
+    cJSON* pressure = cJSON_AddObjectToObject(json, "pressure");
+    cJSON_AddNumberToObject(pressure, "high", reg::get(reg::HIGH_PRESSURE) / 100.0);
+    cJSON_AddNumberToObject(pressure, "low", reg::get(reg::LOW_PRESSURE) / 100.0);
+
+    // --- Peripherals ---
+    cJSON* periph = cJSON_AddObjectToObject(json, "peripherals");
+    cJSON_AddStringToObject(periph, "fan_speed", fanSpeedString(sts2));
+    cJSON_AddNumberToObject(periph, "fan_rpm", reg::get(reg::FAN_SPEED));
+    cJSON_AddBoolToObject(periph, "water_pump", (sts2 & reg::STS2_WATER_PUMP) != 0);
+    cJSON_AddBoolToObject(periph, "water_flow", (sts2 & reg::STS2_WATER_FLOW) != 0);
+    cJSON_AddBoolToObject(periph, "four_way_valve", (sts2 & reg::STS2_4WAY_VALVE) != 0);
+    cJSON_AddBoolToObject(periph, "electric_heater", (sts2 & reg::STS2_ELEC_HEATER) != 0);
+    cJSON_AddBoolToObject(periph, "three_way_v1", (sts2 & reg::STS2_3WAY_V1) != 0);
+    cJSON_AddBoolToObject(periph, "three_way_v2", (sts2 & reg::STS2_3WAY_V2) != 0);
+    cJSON_AddNumberToObject(periph, "primary_eev", reg::get(reg::PRIMARY_EEV));
+    cJSON_AddNumberToObject(periph, "secondary_eev", reg::get(reg::SECONDARY_EEV));
+    cJSON_AddBoolToObject(periph, "defrost", (sts3 & (1 << 5)) != 0);
+
+    // --- Errors ---
+    uint16_t ec1 = reg::get(reg::ERROR_CODE_1);
+    uint16_t ec2 = reg::get(reg::ERROR_CODE_2);
+    uint16_t ec3 = reg::get(reg::ERROR_CODE_3);
+    bool has_errors = (ec1 | ec2 | ec3) != 0;
+    cJSON_AddBoolToObject(json, "has_errors", has_errors);
+    cJSON* errors = cJSON_AddArrayToObject(json, "errors");
+    if (has_errors) {
+        addActiveErrors(errors, ec1, ec2, ec3);
+    }
+
+    return sendJson(req, json);
+}
+
+// ============================================================================
 // GET /api/status
 // ============================================================================
 
@@ -95,7 +226,7 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
 
     cJSON* json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "firmware", "arctic-simulator");
-    cJSON_AddStringToObject(json, "version", "0.1.0");
+    cJSON_AddStringToObject(json, "version", "0.2.0");
     cJSON_AddBoolToObject(json, "modbus_active", mb_slave::isInitialized());
 
     cJSON* mb = cJSON_AddObjectToObject(json, "modbus_stats");
@@ -380,6 +511,7 @@ esp_err_t start() {
     const httpd_uri_t uris[] = {
         { "/",                    HTTP_GET,  handleDashboard,     nullptr },
         { "/api/status",          HTTP_GET,  handleGetStatus,     nullptr },
+        { "/api/heatpump",        HTTP_GET,  handleGetHeatpump,   nullptr },
         { "/api/registers",       HTTP_GET,  handleGetRegisters,  nullptr },
         { "/api/registers",       HTTP_PUT,  handlePutRegister,   nullptr },
         { "/api/registers/bulk",  HTTP_POST, handleBulkSet,       nullptr },

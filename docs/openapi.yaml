@@ -11,7 +11,7 @@ info:
 
     DC voltage (reg 2122) uses ÷10, pressure (regs 2126-2127) uses ÷100,
     as documented in the protocol.
-  version: 0.1.0
+  version: 0.2.0
   contact:
     name: Arctic Simulator
     url: https://github.com/sslivins/arctic-simulator
@@ -23,8 +23,10 @@ servers:
 tags:
   - name: Status
     description: Simulator status and health
+  - name: Heat Pump
+    description: Abstracted heat pump state
   - name: Registers
-    description: Read and write Modbus register values
+    description: Read and write Modbus register values (raw)
   - name: Presets
     description: Load predefined register states
   - name: Errors
@@ -46,6 +48,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatusResponse"
+
+  /api/heatpump:
+    get:
+      tags: [Heat Pump]
+      summary: Get abstracted heat pump state
+      description: |
+        Returns the current heat pump state with human-readable field names
+        and converted units. DC voltage is converted to volts (÷10), pressure
+        to MPa (÷100), and status bits are decoded into named booleans.
+        Error registers are decoded into an array of active error names.
+
+        Use this endpoint for application integration. Use `/api/registers`
+        for raw register access.
+      operationId: getHeatpump
+      responses:
+        "200":
+          description: Heat pump state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HeatpumpResponse"
 
   /api/registers:
     get:
@@ -316,7 +339,7 @@ components:
           example: arctic-simulator
         version:
           type: string
-          example: 0.1.0
+          example: 0.2.0
         modbus_active:
           type: boolean
           example: true
@@ -467,3 +490,158 @@ components:
           type: integer
           description: Milliseconds elapsed since playback started
           example: 1500
+
+    HeatpumpResponse:
+      type: object
+      properties:
+        unit_on:
+          type: boolean
+          description: Whether the heat pump is powered on (STATUS_2 bit 0)
+          example: true
+        mode:
+          type: string
+          enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto, unknown]
+          description: Current operating mode
+          example: floor_heating
+        mode_raw:
+          type: integer
+          description: Raw working mode register value
+          example: 1
+        setpoints:
+          type: object
+          description: Temperature setpoints commanded by controller (°C)
+          properties:
+            cooling:
+              type: integer
+              example: 7
+            heating:
+              type: integer
+              example: 45
+            hot_water:
+              type: integer
+              example: 55
+        temperatures:
+          type: object
+          description: Sensor temperatures (°C, whole degrees)
+          properties:
+            outlet_water:
+              type: integer
+              example: 42
+            inlet_water:
+              type: integer
+              example: 38
+            water_tank:
+              type: integer
+              example: 50
+            outdoor_ambient:
+              type: integer
+              example: 5
+            discharge:
+              type: integer
+              example: 75
+            suction:
+              type: integer
+              example: 7
+            outdoor_coil:
+              type: integer
+              example: 3
+            indoor_coil:
+              type: integer
+              example: 35
+            ipm:
+              type: integer
+              example: 45
+        compressor:
+          type: object
+          properties:
+            running:
+              type: boolean
+              example: true
+            frequency:
+              type: integer
+              description: Compressor frequency in Hz
+              example: 55
+            phase_current:
+              type: integer
+              description: Compressor phase current in A
+              example: 3
+        electrical:
+          type: object
+          properties:
+            ac_voltage:
+              type: integer
+              description: AC voltage in V
+              example: 230
+            ac_current:
+              type: integer
+              description: AC current in A
+              example: 5
+            dc_voltage:
+              type: number
+              description: DC bus voltage in V (raw register ÷10)
+              example: 37.5
+        pressure:
+          type: object
+          properties:
+            high:
+              type: number
+              description: High-side pressure in MPa (raw register ÷100)
+              example: 2.8
+            low:
+              type: number
+              description: Low-side pressure in MPa (raw register ÷100)
+              example: 0.45
+        peripherals:
+          type: object
+          properties:
+            fan_speed:
+              type: string
+              enum: [off, low, medium, high]
+              example: low
+            fan_rpm:
+              type: integer
+              description: DC fan motor speed
+              example: 450
+            water_pump:
+              type: boolean
+              example: true
+            water_flow:
+              type: boolean
+              example: true
+            four_way_valve:
+              type: boolean
+              description: Reversing valve (active in cooling mode)
+              example: false
+            electric_heater:
+              type: boolean
+              example: false
+            three_way_v1:
+              type: boolean
+              description: DHW circuit valve
+              example: false
+            three_way_v2:
+              type: boolean
+              example: false
+            primary_eev:
+              type: integer
+              description: Primary EEV opening in steps
+              example: 200
+            secondary_eev:
+              type: integer
+              description: Secondary EEV opening in steps
+              example: 0
+            defrost:
+              type: boolean
+              example: false
+        has_errors:
+          type: boolean
+          description: True if any error bits are set
+          example: false
+        errors:
+          type: array
+          description: |
+            List of active error names decoded from registers 2134, 2137, 2138.
+            Empty when has_errors is false.
+          items:
+            type: string
+          example: []
