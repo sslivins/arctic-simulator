@@ -4,6 +4,7 @@
  */
 #include "modbus_slave.h"
 #include "register_map.h"
+#include "simulation.h"
 #include "esp_log.h"
 #include "driver/uart.h"
 #include "mbcontroller.h"
@@ -140,6 +141,7 @@ bool processEvents() {
     if (event & MB_EVENT_HOLDING_REG_WR) {
         s_stats.write_count++;
         ESP_LOGD(TAG, "Master wrote register(s)");
+        simulation::updateStatus();
         return true;
     }
 

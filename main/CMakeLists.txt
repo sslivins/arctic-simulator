@@ -34,6 +34,7 @@ idf_component_register(
         "api_server.cpp"
         "playback.cpp"
         "wifi_manager.cpp"
+        "simulation.cpp"
     INCLUDE_DIRS
         "."
     EMBED_FILES
