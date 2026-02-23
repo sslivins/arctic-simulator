@@ -55,7 +55,7 @@ constexpr uint16_t FREQ_CTRL_SETTING     = 2057;
 // Input Register Addresses (R/O) — 2100–2138
 // ============================================================================
 
-// Temperatures (values in tenths of °C, unsigned — offset by 60°C for negatives)
+// Temperatures (whole °C, UINT16 — negative encoding TBD, see protocol doc)
 constexpr uint16_t WATER_TANK_TEMP       = 2100;
 constexpr uint16_t OUTLET_WATER_TEMP     = 2102;
 constexpr uint16_t INLET_WATER_TEMP      = 2103;
