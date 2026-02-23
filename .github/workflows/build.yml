@@ -8,7 +8,7 @@ on:
       - 'CMakeLists.txt'
       - 'sdkconfig.defaults'
       - 'partitions.csv'
-      - '.github/workflows/**'
+      - '.github/workflows/build.yml'
   pull_request:
     branches: [main]
     paths:
@@ -16,24 +16,58 @@ on:
       - 'CMakeLists.txt'
       - 'sdkconfig.defaults'
       - 'partitions.csv'
-      - '.github/workflows/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: espressif/idf:v5.4.3
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Build
-        shell: bash
+      - name: Extract version from CMakeLists.txt
+        id: version
         run: |
-          . $IDF_PATH/export.sh
-          idf.py set-target esp32s3
-          idf.py build
+          VERSION=$(grep -oP 'set\(PROJECT_VER\s*"\K[^"]+' CMakeLists.txt)
+          if [ -z "$VERSION" ]; then
+            echo "::warning::Could not extract PROJECT_VER from CMakeLists.txt, using 'unknown'"
+            VERSION="unknown"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Building version: $VERSION"
 
-      - name: Check binary size
-        shell: bash
+      - name: ESP-IDF Build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.3
+          target: esp32s3
+          path: '.'
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-v${{ steps.version.outputs.version }}-esp32s3
+          path: |
+            build/arctic-simulator.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+          retention-days: 30
+
+      - name: Build summary
         run: |
-          . $IDF_PATH/export.sh
-          idf.py size
+          echo "## Build Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | esp32s3 |" >> $GITHUB_STEP_SUMMARY
+          echo "| ESP-IDF | v5.4.3 |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- \`arctic-simulator.bin\` — Main firmware" >> $GITHUB_STEP_SUMMARY
+          echo "- \`bootloader.bin\` — Bootloader" >> $GITHUB_STEP_SUMMARY
+          echo "- \`partition-table.bin\` — Partition table" >> $GITHUB_STEP_SUMMARY

@@ -27,6 +27,22 @@
 static const char* TAG = "api";
 static httpd_handle_t s_server = nullptr;
 
+// Embedded web dashboard — gzip compressed (main/web/index.html.gz via EMBED_FILES)
+extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
+extern const uint8_t index_html_gz_end[]   asm("_binary_index_html_gz_end");
+
+// ============================================================================
+// Dashboard
+// ============================================================================
+
+static esp_err_t handleDashboard(httpd_req_t* req) {
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    size_t len = index_html_gz_end - index_html_gz_start;
+    httpd_resp_send(req, (const char*)index_html_gz_start, len);
+    return ESP_OK;
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -359,6 +375,7 @@ esp_err_t start() {
 
     // Register URI handlers
     const httpd_uri_t uris[] = {
+        { "/",                    HTTP_GET,  handleDashboard,     nullptr },
         { "/api/status",          HTTP_GET,  handleGetStatus,     nullptr },
         { "/api/registers",       HTTP_GET,  handleGetRegisters,  nullptr },
         { "/api/registers",       HTTP_PUT,  handlePutRegister,   nullptr },

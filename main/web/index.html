@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arctic Simulator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 16px; max-width: 800px; margin: 0 auto; }
+h1 { color: #64b5f6; font-size: 1.4em; margin-bottom: 12px; }
+h2 { color: #90caf9; font-size: 1.1em; margin: 16px 0 8px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+.card { background: #16213e; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.status-bar { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.85em; }
+.status-bar .item { display: flex; align-items: center; gap: 4px; }
+.status-bar .dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot.on { background: #4caf50; }
+.dot.off { background: #666; }
+
+/* Controller command display (read-only) */
+.cmd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.cmd-item { padding: 8px 10px; background: #1a1a2e; border-radius: 6px; font-size: 0.85em; }
+.cmd-item .cmd-label { color: #888; font-size: 0.75em; text-transform: uppercase; margin-bottom: 2px; }
+.cmd-item .cmd-value { color: #90caf9; font-size: 1em; font-weight: 500; }
+.cmd-item .cmd-value.on { color: #4caf50; }
+.cmd-item .cmd-value.off { color: #666; }
+
+/* Error inject buttons */
+/* Error groups */
+.err-group { margin-bottom: 10px; }
+.err-group-label { font-size: 0.75em; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; padding-left: 2px; }
+.err-group-btns { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
+.err-group-btns button { padding: 6px 4px; border: 1px solid #ef5350; border-radius: 5px; background: #1a1a2e; color: #ef5350; cursor: pointer; font-size: 0.8em; transition: all 0.15s; }
+.err-group-btns button:hover { background: #4a1a1a; }
+.err-group-btns button.active { background: #c62828; color: #fff; }
+
+/* Toggles */
+.toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.toggle { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: #1a1a2e; border-radius: 4px; font-size: 0.85em; }
+.toggle label { cursor: pointer; user-select: none; }
+.switch { position: relative; width: 36px; height: 20px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; inset: 0; background: #444; border-radius: 20px; transition: 0.2s; }
+.slider::before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px; background: #ccc; border-radius: 50%; transition: 0.2s; }
+.switch input:checked + .slider { background: #4caf50; }
+.switch input:checked + .slider::before { transform: translateX(16px); background: #fff; }
+
+/* Value inputs */
+.values { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.val-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; background: #1a1a2e; border-radius: 4px; font-size: 0.85em; }
+.val-row input { width: 70px; padding: 4px 6px; background: #0f3460; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; text-align: right; font-size: 0.85em; }
+.val-row input:focus { outline: none; border-color: #64b5f6; }
+.val-row .unit { color: #888; font-size: 0.8em; margin-left: 4px; width: 30px; }
+
+/* Playback */
+.playback-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.playback-controls button { padding: 6px 14px; border: 1px solid #444; border-radius: 4px; background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 0.85em; }
+.playback-controls button:hover { background: #2a3a5e; }
+.playback-controls .state { font-size: 0.85em; color: #90caf9; }
+textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background: #0f3460; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; font-family: monospace; font-size: 0.8em; resize: vertical; }
+
+/* Errors */
+.error-section { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.error-section button { padding: 6px 14px; border: 1px solid #ef5350; border-radius: 4px; background: #1a1a2e; color: #ef5350; cursor: pointer; }
+.error-section button:hover { background: #4a1a1a; }
+.error-flags { font-size: 0.85em; color: #ef5350; }
+.error-flags.none { color: #4caf50; }
+
+/* Modbus stats */
+.stats { display: flex; gap: 16px; font-size: 0.85em; color: #888; }
+
+/* Toast */
+.toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 16px; border-radius: 6px; color: #fff; font-size: 0.85em; opacity: 0; transition: opacity 0.3s; z-index: 100; }
+.toast.show { opacity: 1; }
+.toast.ok { background: #2e7d32; }
+.toast.err { background: #c62828; }
+</style>
+</head>
+<body>
+
+<h1>🧊 Arctic Simulator</h1>
+
+<!-- Status -->
+<div class="card">
+  <div class="status-bar">
+    <div class="item"><span class="dot" id="dot-modbus"></span> Modbus</div>
+    <div class="item"><span class="dot" id="dot-wifi"></span> WiFi</div>
+    <div class="item" id="version-info"></div>
+  </div>
+  <div class="stats" id="modbus-stats"></div>
+</div>
+
+<!-- Controller Commands (holding registers — read-only, written by master) -->
+<h2>Controller Commands</h2>
+<div class="card">
+  <div class="cmd-grid" id="cmd-display"></div>
+</div>
+
+<!-- System Status (input register 2135) -->
+<h2>System Status</h2>
+<div class="card">
+  <div class="toggles" id="status-toggles"></div>
+</div>
+
+<!-- Temperatures & Sensors -->
+<h2>Temperatures & Sensors</h2>
+<div class="card">
+  <div class="values" id="temp-values"></div>
+</div>
+
+<!-- Electrical -->
+<h2>Electrical / Mechanical</h2>
+<div class="card">
+  <div class="values" id="elec-values"></div>
+</div>
+
+<!-- Errors -->
+<h2>Errors</h2>
+<div class="card">
+  <div class="error-section">
+    <button onclick="clearErrors()">Clear All Errors</button>
+    <span class="error-flags none" id="error-display">No errors</span>
+  </div>
+  <div id="error-groups" style="margin-top:10px"></div>
+</div>
+
+<!-- Playback -->
+<h2>Playback</h2>
+<div class="card">
+  <div class="playback-controls">
+    <button onclick="startPlayback()">▶ Start</button>
+    <button onclick="stopPlayback()">⏹ Stop</button>
+    <button onclick="loadPlayback()">📂 Load</button>
+    <span class="state" id="playback-state">idle</span>
+  </div>
+  <textarea id="capture-data" placeholder="Paste JSONL capture data here..."></textarea>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const BASE = '';
+
+// ============================================================================
+// Controller Commands (holding registers — read-only display)
+// ============================================================================
+const MODE_NAMES = { 0: 'Cooling', 1: 'Floor Heat', 2: 'Fan Coil Heat', 5: 'Hot Water', 6: 'Auto' };
+
+function updateCommandDisplay() {
+  const on = !!(currentRegisters['2000']);
+  const mode = currentRegisters['2001'] || 0;
+  const coolSp = currentRegisters['2002'] || 0;
+  const heatSp = currentRegisters['2003'] || 0;
+  const hwSp   = currentRegisters['2004'] || 0;
+
+  document.getElementById('cmd-display').innerHTML = `
+    <div class="cmd-item"><div class="cmd-label">Power</div><div class="cmd-value ${on ? 'on' : 'off'}">${on ? 'ON' : 'OFF'}</div></div>
+    <div class="cmd-item"><div class="cmd-label">Mode</div><div class="cmd-value">${MODE_NAMES[mode] || 'Unknown (' + mode + ')'}</div></div>
+    <div class="cmd-item"><div class="cmd-label">Cooling SP</div><div class="cmd-value">${coolSp}°C</div></div>
+    <div class="cmd-item"><div class="cmd-label">Heating SP</div><div class="cmd-value">${heatSp}°C</div></div>
+    <div class="cmd-item"><div class="cmd-label">Hot Water SP</div><div class="cmd-value">${hwSp}°C</div></div>
+  `;
+}
+
+// ============================================================================
+// Status indicators (register 2135 bits — read-only)
+// ============================================================================
+const STATUS_BITS = [
+  { bit: 0,  label: 'Unit ON' },
+  { bit: 1,  label: 'Compressor' },
+  { bit: 2,  label: 'Fan High' },
+  { bit: 3,  label: 'Fan Med' },
+  { bit: 4,  label: 'Fan Low' },
+  { bit: 5,  label: 'Water Pump' },
+  { bit: 6,  label: '4-Way Valve' },
+  { bit: 7,  label: 'Elec Heater' },
+  { bit: 8,  label: 'Water Flow' },
+  { bit: 11, label: 'Remote ON' },
+  { bit: 13, label: '3-Way V1' },
+  { bit: 14, label: '3-Way V2' },
+];
+
+function renderToggles() {
+  const el = document.getElementById('status-toggles');
+  el.innerHTML = STATUS_BITS.map(s =>
+    `<div class="toggle">
+      <label for="sts-${s.bit}">${s.label}</label>
+      <label class="switch"><input type="checkbox" id="sts-${s.bit}" data-bit="${s.bit}" onchange="toggleStatusBit(${s.bit})"><span class="slider"></span></label>
+    </div>`
+  ).join('');
+}
+
+async function toggleStatusBit(bit) {
+  const cb = document.getElementById('sts-' + bit);
+  let val = currentRegisters['2135'] || 0;
+  if (cb.checked) val |= (1 << bit);
+  else val &= ~(1 << bit);
+  await setRegister(2135, val);
+}
+
+// ============================================================================
+// Temperature & sensor value inputs — whole °C, no scaling
+// ============================================================================
+const TEMP_FIELDS = [
+  { addr: 2100, label: 'Water Tank', unit: '°C' },
+  { addr: 2102, label: 'Outlet Water', unit: '°C' },
+  { addr: 2103, label: 'Inlet Water', unit: '°C' },
+  { addr: 2104, label: 'Discharge', unit: '°C' },
+  { addr: 2105, label: 'Suction', unit: '°C' },
+  { addr: 2107, label: 'Outdoor Coil', unit: '°C' },
+  { addr: 2108, label: 'Indoor Coil', unit: '°C' },
+  { addr: 2110, label: 'Outdoor Ambient', unit: '°C' },
+  { addr: 2114, label: 'IPM Temp', unit: '°C' },
+];
+
+const ELEC_FIELDS = [
+  { addr: 2118, label: 'Compressor Freq', unit: 'Hz' },
+  { addr: 2119, label: 'Fan Speed', unit: 'RPM' },
+  { addr: 2120, label: 'AC Voltage', unit: 'V' },
+  { addr: 2121, label: 'AC Current', unit: 'A' },
+  { addr: 2122, label: 'DC Voltage', unit: 'V' },
+  { addr: 2124, label: 'Primary EEV', unit: 'stp' },
+  { addr: 2126, label: 'High Pressure', unit: 'kPa' },
+  { addr: 2127, label: 'Low Pressure', unit: 'kPa' },
+];
+
+function renderValues(fields, containerId) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = fields.map(f =>
+    `<div class="val-row">
+      <span>${f.label}</span>
+      <div><input type="number" id="val-${f.addr}" data-addr="${f.addr}"
+        step="1"
+        onchange="onValueChange(${f.addr})"
+        ><span class="unit">${f.unit}</span></div>
+    </div>`
+  ).join('');
+}
+
+async function onValueChange(addr) {
+  const input = document.getElementById('val-' + addr);
+  const raw = Math.round(parseFloat(input.value));
+  await setRegister(addr, raw);
+}
+
+// ============================================================================
+// Error injection buttons
+// ============================================================================
+const ERROR_GROUPS = [
+  { heading: 'Sensor Faults (E-series)', errors: [
+    { label: 'E01',  reg: 2137, bit: 6,  desc: 'Discharge temp sensor' },
+    { label: 'E05',  reg: 2137, bit: 5,  desc: 'External coil sensor' },
+    { label: 'E09',  reg: 2137, bit: 7,  desc: 'Suction temp sensor' },
+    { label: 'E13',  reg: 2137, bit: 4,  desc: 'Cooling coil sensor' },
+    { label: 'E18',  reg: 2137, bit: 3,  desc: 'Outlet water sensor' },
+    { label: 'E19',  reg: 2137, bit: 2,  desc: 'Inlet water sensor' },
+    { label: 'E20',  reg: 2134, bit: 3,  desc: 'Tank temp sensor' },
+    { label: 'E22',  reg: 2137, bit: 8,  desc: 'Ambient temp sensor' },
+    { label: 'E28',  reg: 2137, bit: 1,  desc: 'Outdoor EEPROM' },
+    { label: 'E33',  reg: 2138, bit: 6,  desc: 'High pressure sensor' },
+  ]},
+  { heading: 'Communication', errors: [
+    { label: 'E21',  reg: 2137, bit: 10, desc: 'Wired controller comm' },
+    { label: 'InEE', reg: 2137, bit: 0,  desc: 'Indoor EEPROM' },
+    { label: 'DrvC', reg: 2137, bit: 9,  desc: 'Drive ↔ main board' },
+    { label: 'IOC',  reg: 2137, bit: 12, desc: 'Indoor ↔ outdoor' },
+  ]},
+  { heading: 'Protection (P-series)', errors: [
+    { label: 'P01',  reg: 2138, bit: 8,  desc: 'Water flow switch' },
+    { label: 'P02',  reg: 2138, bit: 6,  desc: 'High pressure switch' },
+    { label: 'P06',  reg: 2138, bit: 7,  desc: 'Low pressure switch' },
+    { label: 'P11',  reg: 2138, bit: 5,  desc: 'High discharge temp' },
+    { label: 'P15',  reg: 2138, bit: 13, desc: 'Large ΔT inlet/outlet' },
+    { label: 'P16',  reg: 2138, bit: 14, desc: 'Low outlet water temp' },
+    { label: 'P19',  reg: 2138, bit: 0,  desc: 'AC current' },
+    { label: 'P27',  reg: 2138, bit: 9,  desc: 'Coil overheat' },
+    { label: 'PA',   reg: 2137, bit: 14, desc: 'High outlet water temp' },
+    { label: 'EC',   reg: 2138, bit: 11, desc: 'Primary low pressure' },
+    { label: 'LAmb', reg: 2138, bit: 10, desc: 'Low ambient temp' },
+  ]},
+  { heading: 'Hardware / Runtime (r-series)', errors: [
+    { label: 'r01',  reg: 2137, bit: 13, desc: 'IPM module fault' },
+    { label: 'r02',  reg: 2137, bit: 11, desc: 'Compressor start' },
+    { label: 'r05',  reg: 2138, bit: 4,  desc: 'IPM over-temperature' },
+    { label: 'r06',  reg: 2138, bit: 1,  desc: 'Compressor phase current' },
+    { label: 'r10',  reg: 2137, bit: 15, desc: 'AC voltage high/low' },
+    { label: 'r11',  reg: 2138, bit: 3,  desc: 'DC bus voltage' },
+    { label: 'r20',  reg: 2138, bit: 15, desc: 'Compressor diff pressure' },
+    { label: 'FA',   reg: 2138, bit: 2,  desc: 'DC fan motor' },
+  ]},
+  { heading: 'Brine / Secondary', errors: [
+    { label: 'BrIn',  reg: 2134, bit: 0, desc: 'Brine inlet sensor' },
+    { label: 'BrOut', reg: 2134, bit: 1, desc: 'Brine outlet sensor' },
+    { label: 'BrFlw', reg: 2134, bit: 2, desc: 'Brine flow protect' },
+    { label: '2ndLP', reg: 2138, bit: 12, desc: 'Secondary low pressure' },
+  ]},
+];
+
+// Flat list for updateUI lookups
+const ERROR_DEFS = ERROR_GROUPS.flatMap(g => g.errors);
+
+function renderErrorButtons() {
+  const el = document.getElementById('error-groups');
+  let globalIdx = 0;
+  el.innerHTML = ERROR_GROUPS.map(g => {
+    const btns = g.errors.map(e => {
+      const idx = globalIdx++;
+      return `<button data-erridx="${idx}" onclick="toggleError(${idx})" title="${e.desc}">${e.label}</button>`;
+    }).join('');
+    return `<div class="err-group"><div class="err-group-label">${g.heading}</div><div class="err-group-btns">${btns}</div></div>`;
+  }).join('');
+}
+
+async function toggleError(idx) {
+  const e = ERROR_DEFS[idx];
+  let val = currentRegisters[String(e.reg)] || 0;
+  val ^= (1 << e.bit);
+  await setRegister(e.reg, val);
+}
+
+// ============================================================================
+// Register I/O
+// ============================================================================
+let currentRegisters = {};
+
+async function setRegister(addr, value) {
+  try {
+    const r = await fetch(BASE + '/api/registers?addr=' + addr, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ value: value })
+    });
+    if (r.ok) {
+      currentRegisters[String(addr)] = value;
+      updateUI();
+    } else { toast('Failed to set register', true); }
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+async function refresh() {
+  try {
+    const statusResp = await fetch(BASE + '/api/status');
+    if (statusResp.ok) {
+      const s = await statusResp.json();
+      document.getElementById('dot-modbus').className = 'dot ' + (s.modbus_active ? 'on' : 'off');
+      document.getElementById('dot-wifi').className = 'dot on';
+      document.getElementById('version-info').textContent = s.version;
+      document.getElementById('modbus-stats').textContent =
+        `R: ${s.modbus_stats.reads}  W: ${s.modbus_stats.writes}  E: ${s.modbus_stats.errors}`;
+      document.getElementById('playback-state').textContent =
+        `${s.playback.state} (${s.playback.position}/${s.playback.entries})`;
+    }
+
+    const regResp = await fetch(BASE + '/api/registers');
+    if (regResp.ok) {
+      const data = await regResp.json();
+      currentRegisters = { ...data.holding, ...data.input };
+      updateUI();
+    }
+  } catch(e) {
+    document.getElementById('dot-wifi').className = 'dot off';
+  }
+}
+
+function updateUI() {
+  // Controller commands (read-only)
+  updateCommandDisplay();
+
+  // Status toggles
+  const sts2 = currentRegisters['2135'] || 0;
+  STATUS_BITS.forEach(s => {
+    const cb = document.getElementById('sts-' + s.bit);
+    if (cb) cb.checked = !!(sts2 & (1 << s.bit));
+  });
+
+  // Temperature & electrical values
+  [...TEMP_FIELDS, ...ELEC_FIELDS].forEach(f => {
+    const input = document.getElementById('val-' + f.addr);
+    if (input && document.activeElement !== input) {
+      input.value = currentRegisters[String(f.addr)] || 0;
+    }
+  });
+
+  // Error display
+  const e1 = currentRegisters['2134'] || 0;
+  const e2 = currentRegisters['2137'] || 0;
+  const e3 = currentRegisters['2138'] || 0;
+  const errEl = document.getElementById('error-display');
+  if (e1 || e2 || e3) {
+    const codes = [];
+    ERROR_DEFS.forEach(e => {
+      const regVal = currentRegisters[String(e.reg)] || 0;
+      if (regVal & (1 << e.bit)) codes.push(e.label);
+    });
+    if (codes.length === 0) codes.push(`raw: ${e1}/${e2}/${e3}`);
+    errEl.textContent = codes.join(', ');
+    errEl.className = 'error-flags';
+  } else {
+    errEl.textContent = 'No errors';
+    errEl.className = 'error-flags none';
+  }
+
+  // Error inject button highlights
+  ERROR_DEFS.forEach((e, i) => {
+    const btn = document.querySelector(`[data-erridx="${i}"]`);
+    if (btn) {
+      const regVal = currentRegisters[String(e.reg)] || 0;
+      const active = !!(regVal & (1 << e.bit));
+      btn.classList.toggle('active', active);
+    }
+  });
+}
+
+// ============================================================================
+// Error control
+// ============================================================================
+async function clearErrors() {
+  try {
+    await fetch(BASE + '/api/errors/clear', { method: 'POST' });
+    toast('Errors cleared');
+    refresh();
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+// ============================================================================
+// Playback
+// ============================================================================
+async function loadPlayback() {
+  const data = document.getElementById('capture-data').value.trim();
+  if (!data) { toast('Paste capture data first', true); return; }
+  try {
+    const r = await fetch(BASE + '/api/playback/load', {
+      method: 'POST', headers: {'Content-Type': 'text/plain'}, body: data
+    });
+    if (r.ok) {
+      const j = await r.json();
+      toast(`Loaded ${j.entries} entries`);
+      refresh();
+    } else { toast('Failed to load', true); }
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+async function startPlayback() {
+  try {
+    const r = await fetch(BASE + '/api/playback/start', { method: 'POST' });
+    if (r.ok) { toast('Playback started'); refresh(); }
+    else { toast('Failed — load capture first', true); }
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+async function stopPlayback() {
+  try {
+    await fetch(BASE + '/api/playback/stop', { method: 'POST' });
+    toast('Playback stopped');
+    refresh();
+  } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+// ============================================================================
+// Toast
+// ============================================================================
+function toast(msg, isError) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (isError ? 'err' : 'ok');
+  setTimeout(() => el.className = 'toast', 2000);
+}
+
+// ============================================================================
+// Init
+// ============================================================================
+renderToggles();
+renderErrorButtons();
+renderValues(TEMP_FIELDS, 'temp-values');
+renderValues(ELEC_FIELDS, 'elec-values');
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

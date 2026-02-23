@@ -123,10 +123,29 @@ Default GPIO pins for Atom S3 + RS485 base (adjust via menuconfig):
 - **Path filters**: Only `main/`, `CMakeLists.txt`, `sdkconfig.defaults`,
   `partitions.csv`, and workflow files trigger builds
 
+### Web Dashboard (gzip rebuild)
+
+The dashboard HTML (`main/web/index.html`) is gzip-compressed and embedded in the
+firmware. The compression runs during **CMake configure** (not during ninja build),
+so editing the HTML and running `idf.py build` alone will **not** pick up changes.
+
+After editing `main/web/index.html`, do one of:
+
+```bash
+# Option A: manually re-gzip then build
+python main/web/gzip_html.py main/web/index.html main/web/index.html.gz
+idf.py build
+
+# Option B: force CMake reconfigure (slower, re-runs full configure)
+idf.py reconfigure
+idf.py build
+```
+
 ## After Major Changes — Checklist
 
 - [ ] Keep register map in sync with `arctic-controller/docs/ARCTIC-MODBUS-PROTOCOL.md`
 - [ ] Update `README.md` if API endpoints or presets changed
 - [ ] Update example capture files if JSONL format changed
+- [ ] Re-gzip `index.html` if the dashboard was modified (see above)
 - [ ] Verify build passes with `idf.py build`
 - [ ] Use conventional commit messages

@@ -1,0 +1,465 @@
+openapi: 3.0.3
+info:
+  title: Arctic Simulator API
+  description: |
+    REST API for the Arctic Heat Pump Simulator.
+    Controls simulated Modbus register values, presets, and capture playback.
+
+    Temperature values are in whole degrees Celsius (e.g. 45 = 45°C),
+    stored as signed int16. Negative values use two's complement.
+  version: 0.1.0
+  contact:
+    name: Arctic Simulator
+    url: https://github.com/sslivins/arctic-simulator
+
+servers:
+  - url: http://arctic-sim.local
+    description: mDNS address (local network)
+
+tags:
+  - name: Status
+    description: Simulator status and health
+  - name: Registers
+    description: Read and write Modbus register values
+  - name: Presets
+    description: Load predefined register states
+  - name: Errors
+    description: Error flag management
+  - name: Playback
+    description: JSONL capture file replay
+
+paths:
+  /api/status:
+    get:
+      tags: [Status]
+      summary: Get simulator status
+      description: Returns firmware info, Modbus statistics, and playback state.
+      operationId: getStatus
+      responses:
+        "200":
+          description: Simulator status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+
+  /api/registers:
+    get:
+      tags: [Registers]
+      summary: Get register values
+      description: |
+        Without `addr` parameter: returns all holding and input registers.
+        With `addr` parameter: returns a single register value.
+
+        Register types:
+        - **Holding (2000–2057)**: Commands written by the Modbus master (controller).
+          Read-only from the heat pump's perspective.
+        - **Input (2100–2138)**: Status reported by the heat pump. Writable via this
+          API to simulate sensor readings, operating state, and error conditions.
+      operationId: getRegisters
+      parameters:
+        - name: addr
+          in: query
+          required: false
+          description: Register address (2000–2057 for holding, 2100–2138 for input)
+          schema:
+            type: integer
+            minimum: 2000
+            maximum: 2138
+      responses:
+        "200":
+          description: Register value(s)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AllRegistersResponse"
+                  - $ref: "#/components/schemas/SingleRegisterResponse"
+        "404":
+          description: Invalid register address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      tags: [Registers]
+      summary: Set a single register
+      description: |
+        Write a value to a register by address. Any register (holding or input)
+        can be written for simulation purposes.
+
+        - Writing an **input register** (2100–2138) changes the simulated heat pump
+          status (temperatures, operating flags, error codes).
+        - Writing a **holding register** (2000–2057) simulates a controller command
+          and triggers the simulation engine to update related input registers.
+      operationId: putRegister
+      parameters:
+        - name: addr
+          in: query
+          required: true
+          description: Register address to write
+          schema:
+            type: integer
+            minimum: 2000
+            maximum: 2138
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetRegisterRequest"
+      responses:
+        "200":
+          description: Register updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SingleRegisterResponse"
+        "400":
+          description: Missing addr parameter or invalid body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Invalid register address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/registers/bulk:
+    post:
+      tags: [Registers]
+      summary: Set multiple registers
+      description: |
+        Write values to multiple registers in a single request.
+        Same semantics as PUT: writing holding registers triggers the simulation
+        engine; writing input registers directly sets simulated status values.
+      operationId: bulkSetRegisters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkSetRequest"
+      responses:
+        "200":
+          description: Registers updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkSetResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/preset:
+    post:
+      tags: [Presets]
+      summary: Load a preset
+      description: |
+        Sets all registers to a predefined state. Available presets:
+        `idle`, `heating`, `cooling`, `hot_water`, `defrost`, `error_e01`, `error_p01`
+      operationId: loadPreset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresetRequest"
+      responses:
+        "200":
+          description: Preset loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresetResponse"
+        "400":
+          description: Unknown preset name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/errors/clear:
+    post:
+      tags: [Errors]
+      summary: Clear all error flags
+      description: Resets error registers 2134, 2137, and 2138 to zero.
+      operationId: clearErrors
+      responses:
+        "200":
+          description: Errors cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: cleared
+
+  /api/playback/load:
+    post:
+      tags: [Playback]
+      summary: Upload capture data
+      description: |
+        Uploads a JSONL capture file as the request body.
+        Each line is a JSON object with timestamp, function code, address, and values.
+      operationId: loadPlayback
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              description: JSONL capture data
+              example: |
+                {"t":0,"fc":3,"addr":2100,"count":39,"values":[200,0,250,250,0,0,0,0,0,0,200,0,0,0,0,0,0,0,0,0,230,0,3200,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0]}
+                {"t":500,"fc":6,"addr":2000,"value":1}
+      responses:
+        "200":
+          description: Capture loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackLoadResponse"
+        "400":
+          description: Invalid or empty capture data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/playback/start:
+    post:
+      tags: [Playback]
+      summary: Start playback
+      description: Begin replaying the loaded capture file with original timing.
+      operationId: startPlayback
+      responses:
+        "200":
+          description: Playback started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: playing
+        "400":
+          description: No capture loaded or already playing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/playback/stop:
+    post:
+      tags: [Playback]
+      summary: Stop playback
+      description: Stop replaying and reset position to the beginning.
+      operationId: stopPlayback
+      responses:
+        "200":
+          description: Playback stopped
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: stopped
+
+  /api/playback/status:
+    get:
+      tags: [Playback]
+      summary: Get playback status
+      description: Returns current playback state, position, and elapsed time.
+      operationId: getPlaybackStatus
+      responses:
+        "200":
+          description: Playback status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackStatusResponse"
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+      required: [error]
+      example:
+        error: Invalid register address
+
+    StatusResponse:
+      type: object
+      properties:
+        firmware:
+          type: string
+          example: arctic-simulator
+        version:
+          type: string
+          example: 0.1.0
+        modbus_active:
+          type: boolean
+          example: true
+        modbus_stats:
+          type: object
+          properties:
+            reads:
+              type: integer
+              example: 1234
+            writes:
+              type: integer
+              example: 56
+            errors:
+              type: integer
+              example: 0
+        playback:
+          type: object
+          properties:
+            state:
+              type: string
+              enum: [idle, loaded, playing, paused]
+              example: idle
+            entries:
+              type: integer
+              example: 0
+            position:
+              type: integer
+              example: 0
+
+    SingleRegisterResponse:
+      type: object
+      properties:
+        addr:
+          type: integer
+          example: 2100
+        value:
+          type: integer
+          example: 35
+        type:
+          type: string
+          enum: [holding, input]
+          description: Present only on GET responses
+          example: input
+
+    AllRegistersResponse:
+      type: object
+      properties:
+        holding:
+          type: object
+          description: Holding register values keyed by address (2000–2057)
+          additionalProperties:
+            type: integer
+          example:
+            "2000": 0
+            "2001": 1
+            "2002": 70
+            "2003": 45
+        input:
+          type: object
+          description: Input register values keyed by address (2100–2138)
+          additionalProperties:
+            type: integer
+          example:
+            "2100": 45
+            "2102": 35
+            "2110": 20
+
+    SetRegisterRequest:
+      type: object
+      properties:
+        value:
+          type: integer
+          description: Register value (0–65535)
+          minimum: 0
+          maximum: 65535
+      required: [value]
+      example:
+        value: 35
+
+    BulkSetRequest:
+      type: object
+      properties:
+        registers:
+          type: object
+          description: Map of register address to value
+          additionalProperties:
+            type: integer
+      required: [registers]
+      example:
+        registers:
+          "2100": 35
+          "2110": 20
+          "2118": 55
+
+    BulkSetResponse:
+      type: object
+      properties:
+        updated:
+          type: integer
+          description: Number of registers successfully updated
+          example: 3
+
+    PresetRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          enum: [idle, heating, cooling, hot_water, defrost, error_e01, error_p01]
+      required: [name]
+      example:
+        name: heating
+
+    PresetResponse:
+      type: object
+      properties:
+        preset:
+          type: string
+          example: heating
+        status:
+          type: string
+          example: loaded
+
+    PlaybackLoadResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: loaded
+        entries:
+          type: integer
+          description: Number of capture entries parsed
+          example: 8
+
+    PlaybackStatusResponse:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [idle, loaded, playing, paused]
+          example: playing
+        total_entries:
+          type: integer
+          example: 8
+        current_entry:
+          type: integer
+          example: 3
+        elapsed_ms:
+          type: integer
+          description: Milliseconds elapsed since playback started
+          example: 1500
