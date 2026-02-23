@@ -16,14 +16,22 @@ h2 { color: #90caf9; font-size: 1.1em; margin: 16px 0 8px; border-bottom: 1px so
 .dot.on { background: #4caf50; }
 .dot.off { background: #666; }
 
-/* Presets */
-.presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
-.presets button { padding: 10px 8px; border: 1px solid #444; border-radius: 6px; background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 0.85em; transition: all 0.15s; }
-.presets button:hover { background: #2a3a5e; border-color: #64b5f6; }
-.presets button.active { background: #1565c0; border-color: #64b5f6; color: #fff; }
-.presets button.error { border-color: #ef5350; }
-.presets button.error:hover { background: #4a1a1a; }
-.presets button.error.active { background: #c62828; }
+/* Controller command display (read-only) */
+.cmd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.cmd-item { padding: 8px 10px; background: #1a1a2e; border-radius: 6px; font-size: 0.85em; }
+.cmd-item .cmd-label { color: #888; font-size: 0.75em; text-transform: uppercase; margin-bottom: 2px; }
+.cmd-item .cmd-value { color: #90caf9; font-size: 1em; font-weight: 500; }
+.cmd-item .cmd-value.on { color: #4caf50; }
+.cmd-item .cmd-value.off { color: #666; }
+
+/* Error inject buttons */
+/* Error groups */
+.err-group { margin-bottom: 10px; }
+.err-group-label { font-size: 0.75em; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; padding-left: 2px; }
+.err-group-btns { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
+.err-group-btns button { padding: 6px 4px; border: 1px solid #ef5350; border-radius: 5px; background: #1a1a2e; color: #ef5350; cursor: pointer; font-size: 0.8em; transition: all 0.15s; }
+.err-group-btns button:hover { background: #4a1a1a; }
+.err-group-btns button.active { background: #c62828; color: #fff; }
 
 /* Toggles */
 .toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
@@ -51,7 +59,7 @@ h2 { color: #90caf9; font-size: 1.1em; margin: 16px 0 8px; border-bottom: 1px so
 textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background: #0f3460; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; font-family: monospace; font-size: 0.8em; resize: vertical; }
 
 /* Errors */
-.error-section { display: flex; align-items: center; gap: 8px; }
+.error-section { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .error-section button { padding: 6px 14px; border: 1px solid #ef5350; border-radius: 4px; background: #1a1a2e; color: #ef5350; cursor: pointer; }
 .error-section button:hover { background: #4a1a1a; }
 .error-flags { font-size: 0.85em; color: #ef5350; }
@@ -81,13 +89,13 @@ textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background:
   <div class="stats" id="modbus-stats"></div>
 </div>
 
-<!-- Presets -->
-<h2>Presets</h2>
+<!-- Controller Commands (holding registers — read-only, written by master) -->
+<h2>Controller Commands</h2>
 <div class="card">
-  <div class="presets" id="preset-buttons"></div>
+  <div class="cmd-grid" id="cmd-display"></div>
 </div>
 
-<!-- System Status Toggles (register 2135) -->
+<!-- System Status (input register 2135) -->
 <h2>System Status</h2>
 <div class="card">
   <div class="toggles" id="status-toggles"></div>
@@ -112,6 +120,7 @@ textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background:
     <button onclick="clearErrors()">Clear All Errors</button>
     <span class="error-flags none" id="error-display">No errors</span>
   </div>
+  <div id="error-groups" style="margin-top:10px"></div>
 </div>
 
 <!-- Playback -->
@@ -129,53 +138,31 @@ textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background:
 <div class="toast" id="toast"></div>
 
 <script>
-const BASE = '';  // Same origin
+const BASE = '';
 
 // ============================================================================
-// Presets
+// Controller Commands (holding registers — read-only display)
 // ============================================================================
-const PRESETS = [
-  { name: 'idle', label: 'Idle' },
-  { name: 'heating', label: 'Heating' },
-  { name: 'cooling', label: 'Cooling' },
-  { name: 'hot_water', label: 'Hot Water' },
-  { name: 'defrost', label: 'Defrost' },
-  { name: 'error_e01', label: 'E01', error: true },
-  { name: 'error_p01', label: 'P01', error: true },
-];
+const MODE_NAMES = { 0: 'Cooling', 1: 'Floor Heat', 2: 'Fan Coil Heat', 5: 'Hot Water', 6: 'Auto' };
 
-let activePreset = '';
+function updateCommandDisplay() {
+  const on = !!(currentRegisters['2000']);
+  const mode = currentRegisters['2001'] || 0;
+  const coolSp = currentRegisters['2002'] || 0;
+  const heatSp = currentRegisters['2003'] || 0;
+  const hwSp   = currentRegisters['2004'] || 0;
 
-function renderPresets() {
-  const el = document.getElementById('preset-buttons');
-  el.innerHTML = PRESETS.map(p =>
-    `<button class="${p.error ? 'error' : ''}" data-preset="${p.name}" onclick="loadPreset('${p.name}')">${p.label}</button>`
-  ).join('');
-}
-
-async function loadPreset(name) {
-  try {
-    const r = await fetch(BASE + '/api/preset', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ name })
-    });
-    if (r.ok) {
-      activePreset = name;
-      updatePresetButtons();
-      toast('Preset: ' + name);
-      refresh();
-    } else { toast('Failed', true); }
-  } catch(e) { toast('Error: ' + e.message, true); }
-}
-
-function updatePresetButtons() {
-  document.querySelectorAll('.presets button').forEach(b => {
-    b.classList.toggle('active', b.dataset.preset === activePreset);
-  });
+  document.getElementById('cmd-display').innerHTML = `
+    <div class="cmd-item"><div class="cmd-label">Power</div><div class="cmd-value ${on ? 'on' : 'off'}">${on ? 'ON' : 'OFF'}</div></div>
+    <div class="cmd-item"><div class="cmd-label">Mode</div><div class="cmd-value">${MODE_NAMES[mode] || 'Unknown (' + mode + ')'}</div></div>
+    <div class="cmd-item"><div class="cmd-label">Cooling SP</div><div class="cmd-value">${coolSp}°C</div></div>
+    <div class="cmd-item"><div class="cmd-label">Heating SP</div><div class="cmd-value">${heatSp}°C</div></div>
+    <div class="cmd-item"><div class="cmd-label">Hot Water SP</div><div class="cmd-value">${hwSp}°C</div></div>
+  `;
 }
 
 // ============================================================================
-// Status toggles (register 2135 bits)
+// Status indicators (register 2135 bits — read-only)
 // ============================================================================
 const STATUS_BITS = [
   { bit: 0,  label: 'Unit ON' },
@@ -211,29 +198,29 @@ async function toggleStatusBit(bit) {
 }
 
 // ============================================================================
-// Temperature & sensor value inputs
+// Temperature & sensor value inputs — whole °C, no scaling
 // ============================================================================
 const TEMP_FIELDS = [
-  { addr: 2100, label: 'Water Tank', unit: '°C', div: 10 },
-  { addr: 2102, label: 'Outlet Water', unit: '°C', div: 10 },
-  { addr: 2103, label: 'Inlet Water', unit: '°C', div: 10 },
-  { addr: 2104, label: 'Discharge', unit: '°C', div: 10 },
-  { addr: 2105, label: 'Suction', unit: '°C', div: 10 },
-  { addr: 2107, label: 'Outdoor Coil', unit: '°C', div: 10 },
-  { addr: 2108, label: 'Indoor Coil', unit: '°C', div: 10 },
-  { addr: 2110, label: 'Outdoor Ambient', unit: '°C', div: 10 },
-  { addr: 2114, label: 'IPM Temp', unit: '°C', div: 10 },
+  { addr: 2100, label: 'Water Tank', unit: '°C' },
+  { addr: 2102, label: 'Outlet Water', unit: '°C' },
+  { addr: 2103, label: 'Inlet Water', unit: '°C' },
+  { addr: 2104, label: 'Discharge', unit: '°C' },
+  { addr: 2105, label: 'Suction', unit: '°C' },
+  { addr: 2107, label: 'Outdoor Coil', unit: '°C' },
+  { addr: 2108, label: 'Indoor Coil', unit: '°C' },
+  { addr: 2110, label: 'Outdoor Ambient', unit: '°C' },
+  { addr: 2114, label: 'IPM Temp', unit: '°C' },
 ];
 
 const ELEC_FIELDS = [
-  { addr: 2118, label: 'Compressor Freq', unit: 'Hz', div: 1 },
-  { addr: 2119, label: 'Fan Speed', unit: 'RPM', div: 1 },
-  { addr: 2120, label: 'AC Voltage', unit: 'V', div: 1 },
-  { addr: 2121, label: 'AC Current', unit: 'A', div: 1 },
-  { addr: 2122, label: 'DC Voltage', unit: 'V', div: 10 },
-  { addr: 2124, label: 'Primary EEV', unit: 'stp', div: 1 },
-  { addr: 2126, label: 'High Pressure', unit: 'MPa', div: 100 },
-  { addr: 2127, label: 'Low Pressure', unit: 'MPa', div: 100 },
+  { addr: 2118, label: 'Compressor Freq', unit: 'Hz' },
+  { addr: 2119, label: 'Fan Speed', unit: 'RPM' },
+  { addr: 2120, label: 'AC Voltage', unit: 'V' },
+  { addr: 2121, label: 'AC Current', unit: 'A' },
+  { addr: 2122, label: 'DC Voltage', unit: 'V' },
+  { addr: 2124, label: 'Primary EEV', unit: 'stp' },
+  { addr: 2126, label: 'High Pressure', unit: 'kPa' },
+  { addr: 2127, label: 'Low Pressure', unit: 'kPa' },
 ];
 
 function renderValues(fields, containerId) {
@@ -241,18 +228,93 @@ function renderValues(fields, containerId) {
   el.innerHTML = fields.map(f =>
     `<div class="val-row">
       <span>${f.label}</span>
-      <div><input type="number" id="val-${f.addr}" data-addr="${f.addr}" data-div="${f.div}"
-        step="${f.div > 1 ? '0.1' : '1'}"
-        onchange="onValueChange(${f.addr}, ${f.div})"
+      <div><input type="number" id="val-${f.addr}" data-addr="${f.addr}"
+        step="1"
+        onchange="onValueChange(${f.addr})"
         ><span class="unit">${f.unit}</span></div>
     </div>`
   ).join('');
 }
 
-async function onValueChange(addr, div) {
+async function onValueChange(addr) {
   const input = document.getElementById('val-' + addr);
-  const raw = Math.round(parseFloat(input.value) * div);
+  const raw = Math.round(parseFloat(input.value));
   await setRegister(addr, raw);
+}
+
+// ============================================================================
+// Error injection buttons
+// ============================================================================
+const ERROR_GROUPS = [
+  { heading: 'Sensor Faults (E-series)', errors: [
+    { label: 'E01',  reg: 2137, bit: 6,  desc: 'Discharge temp sensor' },
+    { label: 'E05',  reg: 2137, bit: 5,  desc: 'External coil sensor' },
+    { label: 'E09',  reg: 2137, bit: 7,  desc: 'Suction temp sensor' },
+    { label: 'E13',  reg: 2137, bit: 4,  desc: 'Cooling coil sensor' },
+    { label: 'E18',  reg: 2137, bit: 3,  desc: 'Outlet water sensor' },
+    { label: 'E19',  reg: 2137, bit: 2,  desc: 'Inlet water sensor' },
+    { label: 'E20',  reg: 2134, bit: 3,  desc: 'Tank temp sensor' },
+    { label: 'E22',  reg: 2137, bit: 8,  desc: 'Ambient temp sensor' },
+    { label: 'E28',  reg: 2137, bit: 1,  desc: 'Outdoor EEPROM' },
+    { label: 'E33',  reg: 2138, bit: 6,  desc: 'High pressure sensor' },
+  ]},
+  { heading: 'Communication', errors: [
+    { label: 'E21',  reg: 2137, bit: 10, desc: 'Wired controller comm' },
+    { label: 'InEE', reg: 2137, bit: 0,  desc: 'Indoor EEPROM' },
+    { label: 'DrvC', reg: 2137, bit: 9,  desc: 'Drive ↔ main board' },
+    { label: 'IOC',  reg: 2137, bit: 12, desc: 'Indoor ↔ outdoor' },
+  ]},
+  { heading: 'Protection (P-series)', errors: [
+    { label: 'P01',  reg: 2138, bit: 8,  desc: 'Water flow switch' },
+    { label: 'P02',  reg: 2138, bit: 6,  desc: 'High pressure switch' },
+    { label: 'P06',  reg: 2138, bit: 7,  desc: 'Low pressure switch' },
+    { label: 'P11',  reg: 2138, bit: 5,  desc: 'High discharge temp' },
+    { label: 'P15',  reg: 2138, bit: 13, desc: 'Large ΔT inlet/outlet' },
+    { label: 'P16',  reg: 2138, bit: 14, desc: 'Low outlet water temp' },
+    { label: 'P19',  reg: 2138, bit: 0,  desc: 'AC current' },
+    { label: 'P27',  reg: 2138, bit: 9,  desc: 'Coil overheat' },
+    { label: 'PA',   reg: 2137, bit: 14, desc: 'High outlet water temp' },
+    { label: 'EC',   reg: 2138, bit: 11, desc: 'Primary low pressure' },
+    { label: 'LAmb', reg: 2138, bit: 10, desc: 'Low ambient temp' },
+  ]},
+  { heading: 'Hardware / Runtime (r-series)', errors: [
+    { label: 'r01',  reg: 2137, bit: 13, desc: 'IPM module fault' },
+    { label: 'r02',  reg: 2137, bit: 11, desc: 'Compressor start' },
+    { label: 'r05',  reg: 2138, bit: 4,  desc: 'IPM over-temperature' },
+    { label: 'r06',  reg: 2138, bit: 1,  desc: 'Compressor phase current' },
+    { label: 'r10',  reg: 2137, bit: 15, desc: 'AC voltage high/low' },
+    { label: 'r11',  reg: 2138, bit: 3,  desc: 'DC bus voltage' },
+    { label: 'r20',  reg: 2138, bit: 15, desc: 'Compressor diff pressure' },
+    { label: 'FA',   reg: 2138, bit: 2,  desc: 'DC fan motor' },
+  ]},
+  { heading: 'Brine / Secondary', errors: [
+    { label: 'BrIn',  reg: 2134, bit: 0, desc: 'Brine inlet sensor' },
+    { label: 'BrOut', reg: 2134, bit: 1, desc: 'Brine outlet sensor' },
+    { label: 'BrFlw', reg: 2134, bit: 2, desc: 'Brine flow protect' },
+    { label: '2ndLP', reg: 2138, bit: 12, desc: 'Secondary low pressure' },
+  ]},
+];
+
+// Flat list for updateUI lookups
+const ERROR_DEFS = ERROR_GROUPS.flatMap(g => g.errors);
+
+function renderErrorButtons() {
+  const el = document.getElementById('error-groups');
+  let globalIdx = 0;
+  el.innerHTML = ERROR_GROUPS.map(g => {
+    const btns = g.errors.map(e => {
+      const idx = globalIdx++;
+      return `<button data-erridx="${idx}" onclick="toggleError(${idx})" title="${e.desc}">${e.label}</button>`;
+    }).join('');
+    return `<div class="err-group"><div class="err-group-label">${g.heading}</div><div class="err-group-btns">${btns}</div></div>`;
+  }).join('');
+}
+
+async function toggleError(idx) {
+  const e = ERROR_DEFS[idx];
+  let val = currentRegisters[String(e.reg)] || 0;
+  val ^= (1 << e.bit);
+  await setRegister(e.reg, val);
 }
 
 // ============================================================================
@@ -268,15 +330,13 @@ async function setRegister(addr, value) {
     });
     if (r.ok) {
       currentRegisters[String(addr)] = value;
-      activePreset = '';
-      updatePresetButtons();
+      updateUI();
     } else { toast('Failed to set register', true); }
   } catch(e) { toast('Error: ' + e.message, true); }
 }
 
 async function refresh() {
   try {
-    // Fetch status
     const statusResp = await fetch(BASE + '/api/status');
     if (statusResp.ok) {
       const s = await statusResp.json();
@@ -289,7 +349,6 @@ async function refresh() {
         `${s.playback.state} (${s.playback.position}/${s.playback.entries})`;
     }
 
-    // Fetch registers
     const regResp = await fetch(BASE + '/api/registers');
     if (regResp.ok) {
       const data = await regResp.json();
@@ -302,6 +361,9 @@ async function refresh() {
 }
 
 function updateUI() {
+  // Controller commands (read-only)
+  updateCommandDisplay();
+
   // Status toggles
   const sts2 = currentRegisters['2135'] || 0;
   STATUS_BITS.forEach(s => {
@@ -309,12 +371,11 @@ function updateUI() {
     if (cb) cb.checked = !!(sts2 & (1 << s.bit));
   });
 
-  // Temperature values
+  // Temperature & electrical values
   [...TEMP_FIELDS, ...ELEC_FIELDS].forEach(f => {
     const input = document.getElementById('val-' + f.addr);
     if (input && document.activeElement !== input) {
-      const raw = currentRegisters[String(f.addr)] || 0;
-      input.value = f.div > 1 ? (raw / f.div).toFixed(1) : raw;
+      input.value = currentRegisters[String(f.addr)] || 0;
     }
   });
 
@@ -325,19 +386,10 @@ function updateUI() {
   const errEl = document.getElementById('error-display');
   if (e1 || e2 || e3) {
     const codes = [];
-    if (e2 & (1<<6)) codes.push('E01');
-    if (e2 & (1<<5)) codes.push('E05');
-    if (e2 & (1<<7)) codes.push('E09');
-    if (e2 & (1<<3)) codes.push('E18');
-    if (e2 & (1<<2)) codes.push('E19');
-    if (e1 & (1<<3)) codes.push('E20');
-    if (e2 & (1<<8)) codes.push('E22');
-    if (e3 & (1<<8)) codes.push('P01');
-    if (e3 & (1<<6)) codes.push('P02');
-    if (e3 & (1<<5)) codes.push('P11');
-    if (e3 & (1<<0)) codes.push('P19');
-    if (e2 & (1<<13)) codes.push('r01');
-    if (e3 & (1<<2)) codes.push('FA');
+    ERROR_DEFS.forEach(e => {
+      const regVal = currentRegisters[String(e.reg)] || 0;
+      if (regVal & (1 << e.bit)) codes.push(e.label);
+    });
     if (codes.length === 0) codes.push(`raw: ${e1}/${e2}/${e3}`);
     errEl.textContent = codes.join(', ');
     errEl.className = 'error-flags';
@@ -345,6 +397,16 @@ function updateUI() {
     errEl.textContent = 'No errors';
     errEl.className = 'error-flags none';
   }
+
+  // Error inject button highlights
+  ERROR_DEFS.forEach((e, i) => {
+    const btn = document.querySelector(`[data-erridx="${i}"]`);
+    if (btn) {
+      const regVal = currentRegisters[String(e.reg)] || 0;
+      const active = !!(regVal & (1 << e.bit));
+      btn.classList.toggle('active', active);
+    }
+  });
 }
 
 // ============================================================================
@@ -405,8 +467,8 @@ function toast(msg, isError) {
 // ============================================================================
 // Init
 // ============================================================================
-renderPresets();
 renderToggles();
+renderErrorButtons();
 renderValues(TEMP_FIELDS, 'temp-values');
 renderValues(ELEC_FIELDS, 'elec-values');
 refresh();

@@ -53,10 +53,9 @@ stand-in for the real heat pump during development and integration testing of th
 | `main/` | All application source code |
 | `main/register_map.h/cpp` | Register storage (holding 2000–2057, input 2100–2138), presets |
 | `main/modbus_slave.h/cpp` | Modbus RTU slave via esp_modbus, RS-485 communication |
-| `main/api_server.h/cpp` | REST API endpoints + web dashboard serving |
+| `main/api_server.h/cpp` | REST API endpoints (register control, presets, playback) |
 | `main/playback.h/cpp` | JSONL capture file parser and replay engine |
 | `main/wifi_manager.h/cpp` | WiFi STA mode + mDNS (arctic-sim.local) |
-| `main/web/index.html` | Web dashboard (gzipped and embedded at build time) |
 | `main/main.cpp` | Entry point, FreeRTOS task creation |
 | `main/Kconfig.projbuild` | Menuconfig options (WiFi, GPIO pins, Modbus address) |
 | `captures/` | Example JSONL capture files |
@@ -112,8 +111,8 @@ One JSON object per line:
 
 ### Hardware Configuration
 Default GPIO pins for Atom S3 + RS485 base (adjust via menuconfig):
-- TX: GPIO 19
-- RX: GPIO 22
+- TX: GPIO 6
+- RX: GPIO 5
 - DIR: -1 (auto direction control)
 - UART port: 1
 
@@ -124,11 +123,29 @@ Default GPIO pins for Atom S3 + RS485 base (adjust via menuconfig):
 - **Path filters**: Only `main/`, `CMakeLists.txt`, `sdkconfig.defaults`,
   `partitions.csv`, and workflow files trigger builds
 
+### Web Dashboard (gzip rebuild)
+
+The dashboard HTML (`main/web/index.html`) is gzip-compressed and embedded in the
+firmware. The compression runs during **CMake configure** (not during ninja build),
+so editing the HTML and running `idf.py build` alone will **not** pick up changes.
+
+After editing `main/web/index.html`, do one of:
+
+```bash
+# Option A: manually re-gzip then build
+python main/web/gzip_html.py main/web/index.html main/web/index.html.gz
+idf.py build
+
+# Option B: force CMake reconfigure (slower, re-runs full configure)
+idf.py reconfigure
+idf.py build
+```
+
 ## After Major Changes — Checklist
 
 - [ ] Keep register map in sync with `arctic-controller/docs/ARCTIC-MODBUS-PROTOCOL.md`
 - [ ] Update `README.md` if API endpoints or presets changed
-- [ ] Update `docs/openapi.yaml` when API endpoints are added, changed, or removed
 - [ ] Update example capture files if JSONL format changed
+- [ ] Re-gzip `index.html` if the dashboard was modified (see above)
 - [ ] Verify build passes with `idf.py build`
 - [ ] Use conventional commit messages

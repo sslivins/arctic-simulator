@@ -8,7 +8,6 @@ Modbus RTU slave emulator for the Arctic ECO-600 heat pump, running on an M5Stac
 - **REST API** — Set register values, load presets, control playback via HTTP
 - **Presets** — One-click simulation of common states: idle, heating, cooling, hot water, defrost, error conditions
 - **Playback** — Load JSONL capture files and replay real heat pump communication patterns
-- **Web Dashboard** — Built-in browser UI for toggling compressor, presets, temperatures, and playback
 - **mDNS** — Accessible at `arctic-sim.local`
 
 ## Hardware
@@ -43,30 +42,15 @@ Under **Arctic Simulator Configuration**:
 | WiFi SSID | *(empty)* | Your WiFi network name |
 | WiFi Password | *(empty)* | Your WiFi password |
 | mDNS Hostname | `arctic-sim` | Accessible as `arctic-sim.local` |
-| RS-485 TX GPIO | 19 | Adjust for your RS-485 adapter |
-| RS-485 RX GPIO | 22 | Adjust for your RS-485 adapter |
+| RS-485 TX GPIO | 6 | Adjust for your RS-485 adapter |
+| RS-485 RX GPIO | 5 | Adjust for your RS-485 adapter |
 | RS-485 DIR GPIO | -1 | Direction control pin (-1 = auto) |
 | UART Port | 1 | UART peripheral to use |
 | Modbus Slave Address | 1 | Must match controller config |
 
-## Web Dashboard
-
-Open `http://arctic-sim.local` in a browser to access the built-in dashboard. Features:
-
-- **Preset buttons** — Idle, Heating, Cooling, Hot Water, Defrost, Error E01/P01
-- **System status toggles** — Compressor, fan speeds, water pump, 4-way valve, etc.
-- **Temperature & sensor inputs** — Edit outlet, ambient, discharge temps and more
-- **Electrical readings** — Compressor frequency, fan RPM, voltage, current
-- **Error display & clear** — Shows active error codes with one-click clear
-- **Playback controls** — Paste JSONL capture data, start/stop replay
-
-Auto-refreshes every 2 seconds.
-
 ## REST API
 
 Base URL: `http://arctic-sim.local`
-
-[📖 **Interactive API Docs (Swagger UI)**](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/sslivins/arctic-simulator/main/docs/openapi.yaml)
 
 ### Status
 
@@ -156,21 +140,17 @@ arctic-simulator/
 ├── sdkconfig.defaults          # Default build config
 ├── partitions.csv              # Flash partition table
 ├── main/
-│   ├── CMakeLists.txt          # Component registration + gzip embed
+│   ├── CMakeLists.txt          # Component registration
 │   ├── Kconfig.projbuild       # Menuconfig options
 │   ├── idf_component.yml       # esp-modbus, mdns dependencies
 │   ├── main.cpp                # Entry point, task creation
 │   ├── register_map.h/cpp      # Register storage, presets
 │   ├── modbus_slave.h/cpp      # Modbus RTU slave (esp_modbus)
-│   ├── api_server.h/cpp        # REST API + web UI serving
+│   ├── api_server.h/cpp        # REST API (esp_http_server)
 │   ├── playback.h/cpp          # JSONL capture replay engine
-│   ├── wifi_manager.h/cpp      # WiFi STA + mDNS
-│   └── web/
-│       └── index.html          # Web dashboard (gzipped at build time)
-├── captures/
-│   └── example.jsonl           # Example capture file
-└── docs/
-    └── openapi.yaml            # OpenAPI 3.0.3 spec
+│   └── wifi_manager.h/cpp      # WiFi STA + mDNS
+└── captures/
+    └── example.jsonl           # Example capture file
 ```
 
 ## License
