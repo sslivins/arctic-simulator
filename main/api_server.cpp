@@ -17,6 +17,7 @@
 #include "api_server.h"
 #include "register_map.h"
 #include "modbus_slave.h"
+#include "simulation.h"
 #include "playback.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -191,6 +192,7 @@ static esp_err_t handlePutRegister(httpd_req_t* req) {
     cJSON_Delete(json);
 
     reg::set(addr, value);
+    if (reg::isHolding(addr)) simulation::updateStatus();
     ESP_LOGI(TAG, "Set register %u = %u", addr, value);
 
     cJSON* resp = cJSON_CreateObject();
@@ -228,6 +230,7 @@ static esp_err_t handleBulkSet(httpd_req_t* req) {
     }
     cJSON_Delete(json);
 
+    simulation::updateStatus();
     ESP_LOGI(TAG, "Bulk set %d registers", count);
 
     cJSON* resp = cJSON_CreateObject();
