@@ -4,6 +4,9 @@ info:
   description: |
     REST API for the Arctic Heat Pump Simulator.
     Controls simulated Modbus register values, presets, and capture playback.
+
+    Temperature values are in whole degrees Celsius (e.g. 45 = 45°C),
+    stored as signed int16. Negative values use two's complement.
   version: 0.1.0
   contact:
     name: Arctic Simulator
@@ -47,6 +50,12 @@ paths:
       description: |
         Without `addr` parameter: returns all holding and input registers.
         With `addr` parameter: returns a single register value.
+
+        Register types:
+        - **Holding (2000–2057)**: Commands written by the Modbus master (controller).
+          Read-only from the heat pump's perspective.
+        - **Input (2100–2138)**: Status reported by the heat pump. Writable via this
+          API to simulate sensor readings, operating state, and error conditions.
       operationId: getRegisters
       parameters:
         - name: addr
@@ -76,7 +85,14 @@ paths:
     put:
       tags: [Registers]
       summary: Set a single register
-      description: Write a value to a register by address.
+      description: |
+        Write a value to a register by address. Any register (holding or input)
+        can be written for simulation purposes.
+
+        - Writing an **input register** (2100–2138) changes the simulated heat pump
+          status (temperatures, operating flags, error codes).
+        - Writing a **holding register** (2000–2057) simulates a controller command
+          and triggers the simulation engine to update related input registers.
       operationId: putRegister
       parameters:
         - name: addr
@@ -117,7 +133,10 @@ paths:
     post:
       tags: [Registers]
       summary: Set multiple registers
-      description: Write values to multiple registers in a single request.
+      description: |
+        Write values to multiple registers in a single request.
+        Same semantics as PUT: writing holding registers triggers the simulation
+        engine; writing input registers directly sets simulated status values.
       operationId: bulkSetRegisters
       requestBody:
         required: true
@@ -331,7 +350,7 @@ components:
           example: 2100
         value:
           type: integer
-          example: 350
+          example: 35
         type:
           type: string
           enum: [holding, input]
@@ -350,16 +369,16 @@ components:
             "2000": 0
             "2001": 1
             "2002": 70
-            "2003": 450
+            "2003": 45
         input:
           type: object
           description: Input register values keyed by address (2100–2138)
           additionalProperties:
             type: integer
           example:
-            "2100": 450
-            "2102": 350
-            "2110": 200
+            "2100": 45
+            "2102": 35
+            "2110": 20
 
     SetRegisterRequest:
       type: object
@@ -371,7 +390,7 @@ components:
           maximum: 65535
       required: [value]
       example:
-        value: 350
+        value: 35
 
     BulkSetRequest:
       type: object
@@ -384,8 +403,8 @@ components:
       required: [registers]
       example:
         registers:
-          "2100": 350
-          "2110": 200
+          "2100": 35
+          "2110": 20
           "2118": 55
 
     BulkSetResponse:
