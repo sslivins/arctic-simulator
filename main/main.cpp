@@ -53,7 +53,7 @@ static void playbackTask(void* param) {
 // ============================================================================
 
 extern "C" void app_main(void) {
-    ESP_LOGI(TAG, "=== Arctic Heat Pump Simulator v0.2.0 ===");
+    ESP_LOGI(TAG, "=== Arctic Heat Pump Simulator v0.3.0 ===");
 
     // Initialize NVS (required for WiFi)
     esp_err_t err = nvs_flash_init();
