@@ -51,6 +51,15 @@ h2 { color: #90caf9; font-size: 1.1em; margin: 16px 0 8px; border-bottom: 1px so
 .val-row input:focus { outline: none; border-color: #64b5f6; }
 .val-row .unit { color: #888; font-size: 0.8em; margin-left: 4px; width: 30px; }
 
+/* Segmented control (fan speed) */
+.seg-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: #1a1a2e; border-radius: 4px; font-size: 0.85em; }
+.seg-row .seg-label { color: #e0e0e0; white-space: nowrap; }
+.seg-group { display: flex; border: 1px solid #444; border-radius: 5px; overflow: hidden; }
+.seg-group button { padding: 5px 12px; border: none; border-right: 1px solid #444; background: #16213e; color: #888; cursor: pointer; font-size: 0.8em; transition: all 0.15s; }
+.seg-group button:last-child { border-right: none; }
+.seg-group button:hover { background: #2a3a5e; color: #e0e0e0; }
+.seg-group button.active { background: #1565c0; color: #fff; }
+
 /* Playback */
 .playback-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .playback-controls button { padding: 6px 14px; border: 1px solid #444; border-radius: 4px; background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 0.85em; }
@@ -99,6 +108,7 @@ textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background:
 <h2>System Status</h2>
 <div class="card">
   <div class="toggles" id="status-toggles"></div>
+  <div class="seg-row" id="fan-speed-control" style="margin-top:8px"></div>
 </div>
 
 <!-- Temperatures & Sensors -->
@@ -167,9 +177,6 @@ function updateCommandDisplay() {
 const STATUS_BITS = [
   { bit: 0,  label: 'Unit ON' },
   { bit: 1,  label: 'Compressor' },
-  { bit: 2,  label: 'Fan High' },
-  { bit: 3,  label: 'Fan Med' },
-  { bit: 4,  label: 'Fan Low' },
   { bit: 5,  label: 'Water Pump' },
   { bit: 6,  label: '4-Way Valve' },
   { bit: 7,  label: 'Elec Heater' },
@@ -179,6 +186,15 @@ const STATUS_BITS = [
   { bit: 14, label: '3-Way V2' },
 ];
 
+// Fan speed: bits 2/3/4 are mutually exclusive
+const FAN_SPEEDS = [
+  { label: 'Off',  bits: 0 },
+  { label: 'Low',  bits: (1 << 4) },
+  { label: 'Med',  bits: (1 << 3) },
+  { label: 'High', bits: (1 << 2) },
+];
+const FAN_MASK = (1 << 2) | (1 << 3) | (1 << 4);
+
 function renderToggles() {
   const el = document.getElementById('status-toggles');
   el.innerHTML = STATUS_BITS.map(s =>
@@ -187,6 +203,19 @@ function renderToggles() {
       <label class="switch"><input type="checkbox" id="sts-${s.bit}" data-bit="${s.bit}" onchange="toggleStatusBit(${s.bit})"><span class="slider"></span></label>
     </div>`
   ).join('');
+
+  // Fan speed segmented control
+  const fc = document.getElementById('fan-speed-control');
+  fc.innerHTML = '<span class="seg-label">Fan Speed</span><div class="seg-group">' +
+    FAN_SPEEDS.map((f, i) =>
+      `<button data-fan="${i}" onclick="setFanSpeed(${i})">${f.label}</button>`
+    ).join('') + '</div>';
+}
+
+async function setFanSpeed(idx) {
+  let val = currentRegisters['2135'] || 0;
+  val = (val & ~FAN_MASK) | FAN_SPEEDS[idx].bits;
+  await setRegister(2135, val);
 }
 
 async function toggleStatusBit(bit) {
@@ -369,6 +398,13 @@ function updateUI() {
   STATUS_BITS.forEach(s => {
     const cb = document.getElementById('sts-' + s.bit);
     if (cb) cb.checked = !!(sts2 & (1 << s.bit));
+  });
+
+  // Fan speed segmented control
+  const fanBits = sts2 & FAN_MASK;
+  FAN_SPEEDS.forEach((f, i) => {
+    const btn = document.querySelector(`[data-fan="${i}"]`);
+    if (btn) btn.classList.toggle('active', f.bits === fanBits);
   });
 
   // Temperature & electrical values
