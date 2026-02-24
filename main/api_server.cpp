@@ -22,6 +22,7 @@
 #include "playback.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_app_desc.h"
 #include "cJSON.h"
 #include <string.h>
 #include <stdlib.h>
@@ -226,7 +227,8 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
 
     cJSON* json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "firmware", "arctic-simulator");
-    cJSON_AddStringToObject(json, "version", "0.2.0");
+    const esp_app_desc_t* app = esp_app_get_description();
+    cJSON_AddStringToObject(json, "version", app->version);
     cJSON_AddBoolToObject(json, "modbus_active", mb_slave::isInitialized());
 
     cJSON* mb = cJSON_AddObjectToObject(json, "modbus_stats");

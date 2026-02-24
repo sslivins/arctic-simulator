@@ -41,6 +41,7 @@ idf_component_register(
         "web/index.html.gz"
     REQUIRES
         driver
+        esp_app_format
         esp_http_server
         esp_wifi
         esp_netif
