@@ -1,0 +1,11 @@
+# Arctic Simulator — 8 MB flash partition table (M5Stack Atom S3R)
+#
+# Provides ~6 MB SPIFFS storage for local Modbus recording.
+# To use: set CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"
+#          and CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y in menuconfig.
+#
+# Name,    Type, SubType, Offset,   Size, Flags
+nvs,       data, nvs,     0x9000,   0x6000,
+phy_init,  data, phy,     0xf000,   0x1000,
+factory,   app,  factory, 0x10000,  0x1E0000,
+storage,   data, spiffs,  0x1F0000, 0x610000,

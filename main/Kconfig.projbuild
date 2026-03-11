@@ -52,3 +52,94 @@ menu "Arctic Simulator Configuration"
             Modbus slave address. The Arctic heat pump uses address 1.
 
 endmenu
+
+menu "Display & Button"
+
+    config SIMULATOR_LCD_MOSI
+        int "LCD MOSI (SDA) GPIO"
+        default 21
+        help
+            SPI MOSI pin for the GC9107 LCD.
+            Atom S3: 21   Atom S3R: 21
+
+    config SIMULATOR_LCD_CLK
+        int "LCD CLK (SCK) GPIO"
+        default 15
+        help
+            SPI clock pin for the LCD.
+            Atom S3: 17   Atom S3R: 15
+
+    config SIMULATOR_LCD_CS
+        int "LCD CS GPIO"
+        default 14
+        help
+            SPI chip-select pin for the LCD.
+            Atom S3: 15   Atom S3R: 14
+
+    config SIMULATOR_LCD_DC
+        int "LCD DC GPIO"
+        default 42
+        help
+            Data/Command pin for the LCD.
+            Atom S3: 33   Atom S3R: 42
+
+    config SIMULATOR_LCD_RST
+        int "LCD RST GPIO"
+        default 48
+        help
+            Reset pin for the LCD.
+            Atom S3: 34   Atom S3R: 48
+
+    config SIMULATOR_LCD_BL
+        int "LCD Backlight GPIO (fallback)"
+        default 16
+        help
+            GPIO backlight pin (used when I2C backlight is disabled).
+            Atom S3: 16
+            Atom S3R: not used (backlight is I2C-controlled).
+
+    config SIMULATOR_LCD_BL_I2C
+        bool "I2C backlight (Atom S3R)"
+        default y
+        help
+            Enable I2C-controlled backlight for Atom S3R.
+            The S3R uses an LED controller at I2C address 0x30.
+            Disable this for Atom S3 (which uses GPIO backlight).
+
+    config SIMULATOR_LCD_BL_I2C_SDA
+        int "Backlight I2C SDA GPIO"
+        default 45
+        depends on SIMULATOR_LCD_BL_I2C
+        help
+            I2C SDA pin for the backlight controller.
+            Atom S3R default: 45
+
+    config SIMULATOR_LCD_BL_I2C_SCL
+        int "Backlight I2C SCL GPIO"
+        default 0
+        depends on SIMULATOR_LCD_BL_I2C
+        help
+            I2C SCL pin for the backlight controller.
+            Atom S3R default: 0
+
+    config SIMULATOR_BTN_GPIO
+        int "Front Button GPIO"
+        default 41
+        help
+            GPIO for the front-face button (Atom S3/S3R: 41).
+            Short press toggles local recording on/off.
+
+endmenu
+
+menu "Recorder"
+
+    config SIMULATOR_RECORD_INTERVAL_MS
+        int "Recording snapshot interval (ms)"
+        default 500
+        range 100 5000
+        help
+            How often to capture a full register snapshot during recording.
+            Lower values give finer time resolution but consume more storage.
+            500 ms ≈ 1 KB/s ≈ 3.6 MB/h.
+
+endmenu

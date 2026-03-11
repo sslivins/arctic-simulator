@@ -2,12 +2,14 @@
  * Arctic Heat Pump Simulator
  *
  * Emulates an ECO-600 heat pump's Modbus RTU slave interface
- * on an M5Stack Atom S3 with RS-485 adapter.
+ * on an M5Stack Atom S3 / S3R with RS-485 adapter.
  *
  * Modes:
  *   - Interactive: REST API sets register values, Modbus serves them
  *   - Playback: Loads a JSONL capture file, replays register states
+ *   - Recording: Captures register snapshots to local SPIFFS storage
  *
+ * The 128×128 LCD shows live status; the front button toggles recording.
  * Access the API at http://arctic-sim.local/api/
  */
 #include "register_map.h"
@@ -15,6 +17,8 @@
 #include "api_server.h"
 #include "playback.h"
 #include "wifi_manager.h"
+#include "display.h"
+#include "recorder.h"
 
 #include "esp_log.h"
 #include "esp_app_desc.h"
@@ -50,6 +54,49 @@ static void playbackTask(void* param) {
 }
 
 // ============================================================================
+// Display + button task
+// ============================================================================
+
+static void displayTask(void* param) {
+    ESP_LOGI(TAG, "Display task started");
+    uint32_t counter = 0;
+    while (true) {
+        // Check button every 50 ms for responsive debounce
+        if (display::checkButton()) {
+            // Toggle recording
+            if (recorder::isRecording()) {
+                recorder::stop();
+                ESP_LOGI(TAG, "Recording stopped (button)");
+            } else {
+                if (recorder::start() == ESP_OK) {
+                    ESP_LOGI(TAG, "Recording started (button)");
+                }
+            }
+        }
+
+        // Refresh screen every ~500 ms (every 10th iteration)
+        if (counter % 10 == 0) {
+            display::refresh();
+        }
+
+        counter++;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+// ============================================================================
+// Recorder tick task
+// ============================================================================
+
+static void recorderTask(void* param) {
+    ESP_LOGI(TAG, "Recorder task started");
+    while (true) {
+        recorder::tick();
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_SIMULATOR_RECORD_INTERVAL_MS));
+    }
+}
+
+// ============================================================================
 // Entry point
 // ============================================================================
 
@@ -70,6 +117,20 @@ extern "C" void app_main(void) {
 
     // Initialize playback engine
     playback::init();
+
+    // Initialize local recorder (mounts SPIFFS)
+    err = recorder::init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Recorder init failed — local recording unavailable");
+    }
+
+    // Initialize LCD display + button
+    err = display::init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Display init failed — continuing headless");
+    } else {
+        xTaskCreatePinnedToCore(displayTask, "display", 4096, nullptr, 2, nullptr, 0);
+    }
 
     // Initialize Modbus slave
     err = mb_slave::init();
@@ -92,6 +153,9 @@ extern "C" void app_main(void) {
 
     // Start playback task
     xTaskCreatePinnedToCore(playbackTask, "playback", 4096, nullptr, 3, nullptr, 0);
+
+    // Start recorder task
+    xTaskCreatePinnedToCore(recorderTask, "recorder", 4096, nullptr, 2, nullptr, 0);
 
     ESP_LOGI(TAG, "Simulator ready");
     ESP_LOGI(TAG, "  Modbus: %s (slave addr %d, 2400 8E1)",

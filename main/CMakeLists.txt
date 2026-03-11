@@ -35,6 +35,8 @@ idf_component_register(
         "playback.cpp"
         "wifi_manager.cpp"
         "simulation.cpp"
+        "display.cpp"
+        "recorder.cpp"
     INCLUDE_DIRS
         "."
     EMBED_FILES
@@ -50,4 +52,5 @@ idf_component_register(
         esp_timer
         vfs
         spiffs
+        esp_lcd
 )

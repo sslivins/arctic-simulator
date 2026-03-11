@@ -14,12 +14,18 @@
  *   POST /api/playback/start        — Start playback
  *   POST /api/playback/stop         — Stop playback
  *   GET  /api/playback/status       — Playback status
+ *   POST /api/recorder/start        — Start local recording
+ *   POST /api/recorder/stop         — Stop local recording
+ *   GET  /api/recorder/status       — Recording status
+ *   GET  /api/recorder/download     — Download recorded JSONL
+ *   DELETE /api/recorder/data       — Delete recording file
  */
 #include "api_server.h"
 #include "register_map.h"
 #include "modbus_slave.h"
 #include "simulation.h"
 #include "playback.h"
+#include "recorder.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_app_desc.h"
@@ -244,6 +250,15 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
         pb_status.state == playback::State::PAUSED  ? "paused" : "unknown");
     cJSON_AddNumberToObject(pb, "entries", pb_status.total_entries);
     cJSON_AddNumberToObject(pb, "position", pb_status.current_entry);
+
+    // Recorder
+    auto rec_status = recorder::getStatus();
+    cJSON* rec = cJSON_AddObjectToObject(json, "recorder");
+    cJSON_AddBoolToObject(rec, "recording", rec_status.recording);
+    cJSON_AddNumberToObject(rec, "entries", rec_status.entries);
+    cJSON_AddNumberToObject(rec, "elapsed_ms", rec_status.elapsed_ms);
+    cJSON_AddNumberToObject(rec, "bytes_used", (double)rec_status.bytes_used);
+    cJSON_AddNumberToObject(rec, "bytes_total", (double)rec_status.bytes_total);
 
     return sendJson(req, json);
 }
@@ -477,6 +492,72 @@ static esp_err_t handlePlaybackStatus(httpd_req_t* req) {
 }
 
 // ============================================================================
+// Recorder endpoints
+// ============================================================================
+
+static esp_err_t handleRecorderStart(httpd_req_t* req) {
+    esp_err_t err = recorder::start();
+    if (err != ESP_OK) {
+        return sendError(req, 400, "Cannot start recording (storage not mounted?)");
+    }
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "recording");
+    return sendJson(req, resp);
+}
+
+static esp_err_t handleRecorderStop(httpd_req_t* req) {
+    recorder::stop();
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "stopped");
+    return sendJson(req, resp);
+}
+
+static esp_err_t handleRecorderStatus(httpd_req_t* req) {
+    auto st = recorder::getStatus();
+    cJSON* json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "recording", st.recording);
+    cJSON_AddNumberToObject(json, "entries", st.entries);
+    cJSON_AddNumberToObject(json, "elapsed_ms", st.elapsed_ms);
+    cJSON_AddNumberToObject(json, "bytes_used", (double)st.bytes_used);
+    cJSON_AddNumberToObject(json, "bytes_total", (double)st.bytes_total);
+    return sendJson(req, json);
+}
+
+static esp_err_t handleRecorderDownload(httpd_req_t* req) {
+    // Don't allow download while recording — file is held open
+    if (recorder::isRecording()) {
+        return sendError(req, 409, "Stop recording before downloading");
+    }
+    FILE* f = fopen(recorder::getFilePath(), "r");
+    if (!f) {
+        return sendError(req, 404, "No recording data");
+    }
+    httpd_resp_set_type(req, "application/x-jsonlines");
+    httpd_resp_set_hdr(req, "Content-Disposition",
+                       "attachment; filename=\"recording.jsonl\"");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    char buf[512];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        httpd_resp_send_chunk(req, buf, n);
+    }
+    fclose(f);
+    httpd_resp_send_chunk(req, nullptr, 0);
+    return ESP_OK;
+}
+
+static esp_err_t handleRecorderDelete(httpd_req_t* req) {
+    esp_err_t err = recorder::deleteData();
+    if (err != ESP_OK) {
+        return sendError(req, 500, "Failed to delete recording");
+    }
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "deleted");
+    return sendJson(req, resp);
+}
+
+// ============================================================================
 // CORS preflight
 // ============================================================================
 
@@ -499,7 +580,7 @@ esp_err_t start() {
     if (s_server) return ESP_OK;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = 24;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.stack_size = 8192;
 
@@ -523,6 +604,11 @@ esp_err_t start() {
         { "/api/playback/start",  HTTP_POST, handlePlaybackStart, nullptr },
         { "/api/playback/stop",   HTTP_POST, handlePlaybackStop,  nullptr },
         { "/api/playback/status", HTTP_GET,  handlePlaybackStatus,nullptr },
+        { "/api/recorder/start",  HTTP_POST, handleRecorderStart, nullptr },
+        { "/api/recorder/stop",   HTTP_POST, handleRecorderStop,  nullptr },
+        { "/api/recorder/status", HTTP_GET,  handleRecorderStatus,nullptr },
+        { "/api/recorder/download",HTTP_GET, handleRecorderDownload,nullptr },
+        { "/api/recorder/data",   HTTP_DELETE,handleRecorderDelete,nullptr },
         { "/api/*",               HTTP_OPTIONS, handleOptions,    nullptr },
     };
 

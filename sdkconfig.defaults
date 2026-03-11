@@ -2,6 +2,8 @@
 CONFIG_IDF_TARGET="esp32s3"
 
 # Serial flasher - Atom S3 uses USB-CDC
+# For Atom S3R with 8 MB flash, change to CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+# and set CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
 # Wi-Fi
