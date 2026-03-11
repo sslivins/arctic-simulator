@@ -1,30 +1,44 @@
 # Web UI gzip compression
 # Generate gzipped web file at configure time if source is newer
-set(WEB_SRC "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html")
-set(WEB_GZ "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html.gz")
+# Locate gzip helper script and Python
 set(GZIP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/web/gzip_html.py")
+if(Python3_EXECUTABLE)
+    set(PYTHON_CMD "${Python3_EXECUTABLE}")
+else()
+    find_program(PYTHON_CMD NAMES python3 python)
+endif()
+if(NOT PYTHON_CMD)
+    message(FATAL_ERROR "Python not found - required for gzip compression")
+endif()
 
-if(EXISTS "${WEB_SRC}")
-    if(NOT EXISTS "${WEB_GZ}" OR "${WEB_SRC}" IS_NEWER_THAN "${WEB_GZ}")
-        message(STATUS "Compressing web/index.html -> index.html.gz")
-        if(Python3_EXECUTABLE)
-            set(PYTHON_CMD "${Python3_EXECUTABLE}")
-        else()
-            find_program(PYTHON_CMD NAMES python3 python)
-        endif()
-        if(NOT PYTHON_CMD)
-            message(FATAL_ERROR "Python not found - required for gzip compression")
-        endif()
-        execute_process(
-            COMMAND "${PYTHON_CMD}" "${GZIP_SCRIPT}" "${WEB_SRC}" "${WEB_GZ}"
-            RESULT_VARIABLE GZIP_RESULT
-            ERROR_VARIABLE GZIP_ERROR
-        )
-        if(NOT GZIP_RESULT EQUAL 0)
-            message(FATAL_ERROR "Failed to gzip web/index.html (exit code: ${GZIP_RESULT}, error: ${GZIP_ERROR})")
+# Helper macro: gzip a web file at configure time if source is newer
+macro(gzip_web_file SRC GZ LABEL)
+    if(EXISTS "${SRC}")
+        if(NOT EXISTS "${GZ}" OR "${SRC}" IS_NEWER_THAN "${GZ}")
+            message(STATUS "Compressing ${LABEL}")
+            execute_process(
+                COMMAND "${PYTHON_CMD}" "${GZIP_SCRIPT}" "${SRC}" "${GZ}"
+                RESULT_VARIABLE GZIP_RESULT
+                ERROR_VARIABLE GZIP_ERROR
+            )
+            if(NOT GZIP_RESULT EQUAL 0)
+                message(FATAL_ERROR "Failed to gzip ${LABEL} (exit ${GZIP_RESULT}: ${GZIP_ERROR})")
+            endif()
         endif()
     endif()
-endif()
+endmacro()
+
+# Dashboard
+gzip_web_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html.gz"
+    "web/index.html")
+
+# Captive portal
+gzip_web_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/portal.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/portal.html.gz"
+    "web/portal.html")
 
 idf_component_register(
     SRCS
@@ -34,11 +48,13 @@ idf_component_register(
         "api_server.cpp"
         "playback.cpp"
         "wifi_manager.cpp"
+        "dns_server.cpp"
         "simulation.cpp"
     INCLUDE_DIRS
         "."
     EMBED_FILES
         "web/index.html.gz"
+        "web/portal.html.gz"
     REQUIRES
         driver
         esp_app_format
@@ -50,4 +66,5 @@ idf_component_register(
         esp_timer
         vfs
         spiffs
+        lwip
 )

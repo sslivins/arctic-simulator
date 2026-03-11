@@ -1,16 +1,26 @@
 menu "Arctic Simulator Configuration"
 
     config SIMULATOR_WIFI_SSID
-        string "WiFi SSID"
+        string "WiFi SSID (fallback)"
         default ""
         help
-            SSID of the WiFi network to connect to.
+            Fallback WiFi SSID used only when no credentials are stored
+            in NVS (i.e. the captive portal has not been used yet).
+            Leave empty to always start in provisioning mode.
 
     config SIMULATOR_WIFI_PASSWORD
-        string "WiFi Password"
+        string "WiFi Password (fallback)"
         default ""
         help
-            Password for the WiFi network.
+            Fallback WiFi password (paired with the SSID above).
+
+    config SIMULATOR_WIFI_RESET_HOLD_MS
+        int "Button hold time to reset WiFi (ms)"
+        default 3000
+        range 1000 10000
+        help
+            Hold the front button for this long to erase stored WiFi
+            credentials and reboot into provisioning (SoftAP) mode.
 
     config SIMULATOR_MDNS_HOSTNAME
         string "mDNS Hostname"
