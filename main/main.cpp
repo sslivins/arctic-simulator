@@ -16,6 +16,7 @@
 #include "playback.h"
 #include "wifi_manager.h"
 #include "display.h"
+#include "status_led.h"
 
 #include "esp_log.h"
 #include "esp_app_desc.h"
@@ -94,6 +95,10 @@ extern "C" void app_main(void) {
     // Initialize display (LCD + button)
     display::init();
 
+    // Initialize status LED (SK6812 on top of Atom S3)
+    status_led::init();
+    status_led::setRed();  // Red until WiFi connects
+
     // Initialize Modbus slave
     err = mb_slave::init();
     if (err != ESP_OK) {
@@ -108,6 +113,7 @@ extern "C" void app_main(void) {
     if (err == ESP_OK) {
         // STA connected — start the main API server
         api::start();
+        status_led::setGreen();
         ESP_LOGI(TAG, "API available at http://%s/api/status", wifi::getIPAddress());
     } else if (err == ESP_ERR_NOT_FINISHED) {
         // Provisioning mode — captive portal is already running

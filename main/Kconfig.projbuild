@@ -131,4 +131,11 @@ menu "Display & Button"
         help
             GPIO pin for the front-face button (active-low).
 
+    config SIMULATOR_STATUS_LED_GPIO
+        int "Status LED GPIO (SK6812)"
+        default 35
+        help
+            GPIO pin for the SK6812 addressable RGB LED on top
+            of the M5Stack Atom S3 / S3R.
+
 endmenu
