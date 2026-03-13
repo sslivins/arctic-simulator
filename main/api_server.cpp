@@ -14,12 +14,18 @@
  *   POST /api/playback/start        — Start playback
  *   POST /api/playback/stop         — Stop playback
  *   GET  /api/playback/status       — Playback status
+ *   GET  /api/recorder/status       — Recorder status (PSRAM)
+ *   POST /api/recorder/start        — Start recording
+ *   POST /api/recorder/stop         — Stop recording
+ *   GET  /api/recorder/download     — Download JSONL capture file
+ *   POST /api/recorder/clear        — Discard recorded data
  */
 #include "api_server.h"
 #include "register_map.h"
 #include "modbus_slave.h"
 #include "simulation.h"
 #include "playback.h"
+#include "recorder.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_app_desc.h"
@@ -244,6 +250,15 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
         pb_status.state == playback::State::PAUSED  ? "paused" : "unknown");
     cJSON_AddNumberToObject(pb, "entries", pb_status.total_entries);
     cJSON_AddNumberToObject(pb, "position", pb_status.current_entry);
+
+    // Recorder (PSRAM)
+    auto rec = recorder::getStatus();
+    cJSON* rc = cJSON_AddObjectToObject(json, "recorder");
+    cJSON_AddBoolToObject(rc, "available", rec.available);
+    cJSON_AddBoolToObject(rc, "recording", rec.recording);
+    cJSON_AddNumberToObject(rc, "entries", rec.entries);
+    cJSON_AddNumberToObject(rc, "bytes_used", (double)rec.bytes_used);
+    cJSON_AddNumberToObject(rc, "bytes_total", (double)rec.bytes_total);
 
     return sendJson(req, json);
 }
@@ -477,6 +492,88 @@ static esp_err_t handlePlaybackStatus(httpd_req_t* req) {
 }
 
 // ============================================================================
+// Recorder endpoints
+// ============================================================================
+
+static esp_err_t handleRecorderStatus(httpd_req_t* req) {
+    auto st = recorder::getStatus();
+    cJSON* json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "available", st.available);
+    cJSON_AddBoolToObject(json, "recording", st.recording);
+    cJSON_AddNumberToObject(json, "entries", st.entries);
+    cJSON_AddNumberToObject(json, "elapsed_ms", (double)st.elapsed_ms);
+    cJSON_AddNumberToObject(json, "bytes_used", (double)st.bytes_used);
+    cJSON_AddNumberToObject(json, "bytes_total", (double)st.bytes_total);
+    return sendJson(req, json);
+}
+
+static esp_err_t handleRecorderStart(httpd_req_t* req) {
+    if (!recorder::isAvailable()) {
+        return sendError(req, 400, "Recorder not available (no PSRAM)");
+    }
+    esp_err_t err = recorder::start();
+    if (err != ESP_OK) {
+        return sendError(req, 400, "Already recording");
+    }
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "recording");
+    return sendJson(req, resp);
+}
+
+static esp_err_t handleRecorderStop(httpd_req_t* req) {
+    recorder::stop();
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "stopped");
+    return sendJson(req, resp);
+}
+
+static esp_err_t handleRecorderDownload(httpd_req_t* req) {
+    if (!recorder::isAvailable()) {
+        return sendError(req, 400, "Recorder not available (no PSRAM)");
+    }
+    size_t len = recorder::bufferSize();
+    if (len == 0) {
+        return sendError(req, 404, "No recorded data");
+    }
+
+    // Stop recording if still active so the buffer is stable
+    recorder::stop();
+
+    httpd_resp_set_type(req, "application/x-ndjson");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Content-Disposition",
+                       "attachment; filename=\"capture.jsonl\"");
+
+    // Stream in chunks — httpd_resp_send_chunk handles the chunked
+    // transfer encoding automatically.
+    const uint8_t* data = recorder::bufferData();
+    const size_t CHUNK = 4096;
+    size_t offset = 0;
+    while (offset < len) {
+        size_t to_send = (len - offset) > CHUNK ? CHUNK : (len - offset);
+        esp_err_t err = httpd_resp_send_chunk(req, (const char*)(data + offset), to_send);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Download chunk send failed at offset %u", (unsigned)offset);
+            httpd_resp_send_chunk(req, nullptr, 0);  // finish
+            return err;
+        }
+        offset += to_send;
+    }
+    // Terminate chunked response
+    httpd_resp_send_chunk(req, nullptr, 0);
+    ESP_LOGI(TAG, "Recorder download complete: %u bytes", (unsigned)len);
+    return ESP_OK;
+}
+
+static esp_err_t handleRecorderClear(httpd_req_t* req) {
+    recorder::stop();
+    recorder::clear();
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "cleared");
+    return sendJson(req, resp);
+}
+
+// ============================================================================
 // CORS preflight
 // ============================================================================
 
@@ -499,7 +596,7 @@ esp_err_t start() {
     if (s_server) return ESP_OK;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = 24;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.stack_size = 8192;
 
@@ -523,6 +620,11 @@ esp_err_t start() {
         { "/api/playback/start",  HTTP_POST, handlePlaybackStart, nullptr },
         { "/api/playback/stop",   HTTP_POST, handlePlaybackStop,  nullptr },
         { "/api/playback/status", HTTP_GET,  handlePlaybackStatus,nullptr },
+        { "/api/recorder/status",  HTTP_GET,  handleRecorderStatus,  nullptr },
+        { "/api/recorder/start",   HTTP_POST, handleRecorderStart,   nullptr },
+        { "/api/recorder/stop",    HTTP_POST, handleRecorderStop,    nullptr },
+        { "/api/recorder/download",HTTP_GET,  handleRecorderDownload, nullptr },
+        { "/api/recorder/clear",   HTTP_POST, handleRecorderClear,   nullptr },
         { "/api/*",               HTTP_OPTIONS, handleOptions,    nullptr },
     };
 
