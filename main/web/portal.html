@@ -29,9 +29,10 @@ align-items:center;border-bottom:1px solid #293b5f;transition:background .15s}
 .ssid-name{font-weight:500;word-break:break-all}
 .rssi{font-size:.8em;color:#888;white-space:nowrap;margin-left:8px}
 .lock::before{content:"🔒";font-size:.7em;margin-right:4px}
-input[type=password],input[type=text]{width:100%;padding:10px 14px;border-radius:8px;
+input[type=text]{width:100%;padding:10px 14px;border-radius:8px;
 border:1px solid #293b5f;background:#1a1a2e;color:#e0e0e0;font-size:.95em;
 margin-top:8px;outline:none}
+input.pw{-webkit-text-security:disc;text-security:disc}
 input:focus{border-color:#4fc3f7}
 label{font-size:.85em;color:#aaa;display:block;margin-top:14px}
 .status{text-align:center;padding:12px;border-radius:8px;margin-top:14px;font-size:.9em}
@@ -55,8 +56,8 @@ vertical-align:middle;margin-right:6px}
   <ul class="net-list hidden" id="netList"></ul>
 
   <div id="passGroup" class="hidden">
-    <label for="pass">Password</label>
-    <input type="password" id="pass" placeholder="Enter WiFi password" autocomplete="off">
+    <label for="wifikey">WiFi Passphrase</label>
+    <input type="text" class="pw" id="wifikey" placeholder="Enter passphrase" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
   </div>
 
   <button class="btn-connect hidden" id="connBtn" onclick="doConnect()" disabled>Connect</button>
@@ -121,8 +122,8 @@ function selectNet(ssid,auth,li){
   li.classList.add('sel');
   if(auth>0){
     $('passGroup').classList.remove('hidden');
-    $('pass').value='';
-    $('pass').focus();
+    $('wifikey').value='';
+    $('wifikey').focus();
   }else{
     $('passGroup').classList.add('hidden');
   }
@@ -131,7 +132,7 @@ function selectNet(ssid,auth,li){
 
 async function doConnect(){
   if(!selSSID)return;
-  const pass=selAuth>0?$('pass').value:'';
+  const pass=selAuth>0?$('wifikey').value:'';
   if(selAuth>0&&!pass){
     showStatus('Please enter a password','err');
     return;
