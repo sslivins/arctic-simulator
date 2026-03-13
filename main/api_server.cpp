@@ -19,6 +19,8 @@
  *   POST /api/recorder/stop         — Stop recording
  *   GET  /api/recorder/download     — Download JSONL capture file
  *   POST /api/recorder/clear        — Discard recorded data
+ *   GET  /api/stream                — SSE stream (real-time register snapshots)
+ *   POST /api/stream/stop           — Stop active SSE stream
  */
 #include "api_server.h"
 #include "register_map.h"
@@ -29,12 +31,19 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_app_desc.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include <string.h>
 #include <stdlib.h>
 
 static const char* TAG = "api";
 static httpd_handle_t s_server = nullptr;
+
+// SSE stream state
+static volatile bool   s_streaming        = false;
+static int             s_stream_fd         = -1;
+static httpd_req_t*    s_stream_async_req  = nullptr;
+static TaskHandle_t    s_stream_task       = nullptr;
 
 // Embedded web dashboard — gzip compressed (main/web/index.html.gz via EMBED_FILES)
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
@@ -259,6 +268,10 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
     cJSON_AddNumberToObject(rc, "entries", rec.entries);
     cJSON_AddNumberToObject(rc, "bytes_used", (double)rec.bytes_used);
     cJSON_AddNumberToObject(rc, "bytes_total", (double)rec.bytes_total);
+
+    // SSE stream
+    cJSON* st = cJSON_AddObjectToObject(json, "stream");
+    cJSON_AddBoolToObject(st, "active", (bool)s_streaming);
 
     return sendJson(req, json);
 }
@@ -574,6 +587,138 @@ static esp_err_t handleRecorderClear(httpd_req_t* req) {
 }
 
 // ============================================================================
+// SSE register stream
+// ============================================================================
+
+static void stopActiveStream() {
+    if (!s_streaming) return;
+    s_streaming = false;
+    // Wait for task to detect the flag and exit
+    for (int i = 0; i < 20 && s_stream_task; i++) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (s_stream_task) {
+        ESP_LOGW(TAG, "Force-killing stream task");
+        vTaskDelete(s_stream_task);
+        s_stream_task = nullptr;
+    }
+    if (s_stream_async_req) {
+        httpd_req_async_handler_complete(s_stream_async_req);
+        s_stream_async_req = nullptr;
+    }
+    s_stream_fd = -1;
+}
+
+static void streamTask(void* /*arg*/) {
+    const int fd = s_stream_fd;
+    httpd_handle_t hd = s_server;
+
+    // Send HTTP response headers directly on the socket
+    const char* hdr =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/event-stream\r\n"
+        "Cache-Control: no-cache\r\n"
+        "Connection: keep-alive\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n";
+
+    if (httpd_socket_send(hd, fd, hdr, strlen(hdr), 0) < 0) {
+        ESP_LOGE(TAG, "Stream: failed to send headers");
+        goto cleanup;
+    }
+
+    {
+        int64_t start_us = esp_timer_get_time();
+
+        while (s_streaming) {
+            uint32_t t_ms = (uint32_t)((esp_timer_get_time() - start_us) / 1000);
+            char line[512];
+            int pos;
+
+            // Holding registers
+            pos = snprintf(line, sizeof(line),
+                "data: {\"t\":%lu,\"fc\":3,\"addr\":%u,\"count\":%u,\"values\":[",
+                (unsigned long)t_ms, (unsigned)reg::HOLDING_BASE,
+                (unsigned)reg::HOLDING_COUNT);
+            const uint16_t* hdata = reg::holdingData();
+            for (int i = 0; i < reg::HOLDING_COUNT && pos < (int)sizeof(line) - 10; i++) {
+                if (i > 0) line[pos++] = ',';
+                pos += snprintf(line + pos, sizeof(line) - pos, "%u", hdata[i]);
+            }
+            pos += snprintf(line + pos, sizeof(line) - pos, "]}\n\n");
+            if (httpd_socket_send(hd, fd, line, (size_t)pos, 0) < 0) break;
+
+            // Input registers
+            pos = snprintf(line, sizeof(line),
+                "data: {\"t\":%lu,\"fc\":3,\"addr\":%u,\"count\":%u,\"values\":[",
+                (unsigned long)t_ms, (unsigned)reg::INPUT_BASE,
+                (unsigned)reg::INPUT_COUNT);
+            const uint16_t* idata = reg::inputData();
+            for (int i = 0; i < reg::INPUT_COUNT && pos < (int)sizeof(line) - 10; i++) {
+                if (i > 0) line[pos++] = ',';
+                pos += snprintf(line + pos, sizeof(line) - pos, "%u", idata[i]);
+            }
+            pos += snprintf(line + pos, sizeof(line) - pos, "]}\n\n");
+            if (httpd_socket_send(hd, fd, line, (size_t)pos, 0) < 0) break;
+
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+    }
+
+cleanup:
+    ESP_LOGI(TAG, "Stream ended (fd %d)", s_stream_fd);
+    if (s_stream_async_req) {
+        httpd_req_async_handler_complete(s_stream_async_req);
+        s_stream_async_req = nullptr;
+    }
+    s_stream_fd = -1;
+    s_streaming = false;
+    s_stream_task = nullptr;
+    vTaskDelete(nullptr);
+}
+
+static esp_err_t handleStream(httpd_req_t* req) {
+    // Stop any existing stream first
+    stopActiveStream();
+
+    int fd = httpd_req_to_sockfd(req);
+    if (fd < 0) {
+        return sendError(req, 500, "Failed to get socket");
+    }
+
+    httpd_req_t* async_req = nullptr;
+    esp_err_t err = httpd_req_async_handler_begin(req, &async_req);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Async handler begin failed: %s", esp_err_to_name(err));
+        return sendError(req, 500, "Failed to start stream");
+    }
+
+    s_stream_fd        = fd;
+    s_stream_async_req = async_req;
+    s_streaming        = true;
+
+    BaseType_t ret = xTaskCreate(streamTask, "sse_stream", 4096,
+                                 nullptr, 5, &s_stream_task);
+    if (ret != pdPASS) {
+        httpd_req_async_handler_complete(async_req);
+        s_streaming        = false;
+        s_stream_fd        = -1;
+        s_stream_async_req = nullptr;
+        return sendError(req, 500, "Task creation failed");
+    }
+
+    ESP_LOGI(TAG, "SSE stream started on fd %d", fd);
+    return ESP_OK;
+}
+
+static esp_err_t handleStreamStop(httpd_req_t* req) {
+    stopActiveStream();
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "stopped");
+    return sendJson(req, resp);
+}
+
+// ============================================================================
 // CORS preflight
 // ============================================================================
 
@@ -625,6 +770,8 @@ esp_err_t start() {
         { "/api/recorder/stop",    HTTP_POST, handleRecorderStop,    nullptr },
         { "/api/recorder/download",HTTP_GET,  handleRecorderDownload, nullptr },
         { "/api/recorder/clear",   HTTP_POST, handleRecorderClear,   nullptr },
+        { "/api/stream",           HTTP_GET,  handleStream,          nullptr },
+        { "/api/stream/stop",      HTTP_POST, handleStreamStop,      nullptr },
         { "/api/*",               HTTP_OPTIONS, handleOptions,    nullptr },
     };
 
@@ -638,6 +785,7 @@ esp_err_t start() {
 }
 
 void stop() {
+    stopActiveStream();
     if (s_server) {
         httpd_stop(s_server);
         s_server = nullptr;
