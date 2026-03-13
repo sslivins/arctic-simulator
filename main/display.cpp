@@ -185,12 +185,6 @@ static void fbClear(uint16_t color) {
     for (int i = 0; i < LCD_W * LCD_H; i++) s_fb[i] = color;
 }
 
-static void fbFillRect(int x, int y, int w, int h, uint16_t color) {
-    for (int j = y; j < y + h && j < LCD_H; j++)
-        for (int i = x; i < x + w && i < LCD_W; i++)
-            s_fb[j * LCD_W + i] = color;
-}
-
 static void fbHLine(int x, int y, int w, uint16_t color) {
     if (y < 0 || y >= LCD_H) return;
     for (int i = x; i < x + w && i < LCD_W; i++)
@@ -215,35 +209,6 @@ static void fbDrawChar(int x, int y, char c, uint16_t fg, uint16_t bg) {
         int py = y + row;
         if (px >= 0 && px < LCD_W && py >= 0 && py < LCD_H)
             s_fb[py * LCD_W + px] = bg;
-    }
-}
-
-static void fbDrawStr(int x, int y, const char* str, uint16_t fg, uint16_t bg) {
-    while (*str) {
-        fbDrawChar(x, y, *str, fg, bg);
-        x += CHAR_W;
-        str++;
-    }
-    // Fill remaining row with background
-    while (x < LCD_W) {
-        for (int row = 0; row < 7; row++) {
-            if (y + row >= 0 && y + row < LCD_H)
-                s_fb[(y + row) * LCD_W + x] = bg;
-        }
-        x++;
-    }
-}
-
-// Draw a filled circle (used for recording dot)
-static void fbFillCircle(int cx, int cy, int r, uint16_t color) {
-    for (int dy = -r; dy <= r; dy++) {
-        for (int dx = -r; dx <= r; dx++) {
-            if (dx * dx + dy * dy <= r * r) {
-                int px = cx + dx, py = cy + dy;
-                if (px >= 0 && px < LCD_W && py >= 0 && py < LCD_H)
-                    s_fb[py * LCD_W + px] = color;
-            }
-        }
     }
 }
 
@@ -294,26 +259,6 @@ static void fbDrawStrCentered(int y, const char* str, uint16_t fg, uint16_t bg,
         fbDrawCharScaled(x + i * charW, y, str[i], fg, bg, scale);
     }
 }
-
-// Hollow circle (ring)
-static void fbCircleRing(int cx, int cy, int r_outer, int r_inner,
-                          uint16_t color) {
-    int ro2 = r_outer * r_outer;
-    int ri2 = r_inner * r_inner;
-    for (int dy = -r_outer; dy <= r_outer; dy++) {
-        for (int dx = -r_outer; dx <= r_outer; dx++) {
-            int d2 = dx * dx + dy * dy;
-            if (d2 <= ro2 && d2 >= ri2) {
-                int px = cx + dx, py = cy + dy;
-                if (px >= 0 && px < LCD_W && py >= 0 && py < LCD_H)
-                    s_fb[py * LCD_W + px] = color;
-            }
-        }
-    }
-}
-
-// Blink state — toggled each refresh (~500 ms)
-static bool s_blink_on = true;
 
 // ── Change detection state ─────────────────────────────────────────────
 static uint16_t s_prev_on_off   = 0xFFFF;  // force initial display
