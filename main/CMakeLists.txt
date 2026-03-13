@@ -50,6 +50,8 @@ idf_component_register(
         "wifi_manager.cpp"
         "dns_server.cpp"
         "simulation.cpp"
+        "display.cpp"
+        "recorder.cpp"
     INCLUDE_DIRS
         "."
     EMBED_FILES
@@ -67,4 +69,5 @@ idf_component_register(
         vfs
         spiffs
         lwip
+        esp_lcd
 )

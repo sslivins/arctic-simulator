@@ -15,6 +15,8 @@
 #include "api_server.h"
 #include "playback.h"
 #include "wifi_manager.h"
+#include "display.h"
+#include "recorder.h"
 
 #include "esp_log.h"
 #include "esp_app_desc.h"
@@ -50,6 +52,48 @@ static void playbackTask(void* param) {
 }
 
 // ============================================================================
+// Display refresh + button polling task
+// ============================================================================
+
+static void displayTask(void* param) {
+    ESP_LOGI(TAG, "Display task started");
+    int count = 0;
+    while (true) {
+        // Poll button every 50ms
+        if (display::checkButton()) {
+            // Toggle recording on button press (only in normal mode)
+            if (wifi::getMode() != wifi::Mode::PROVISIONING) {
+                if (recorder::isRecording()) {
+                    recorder::stop();
+                    ESP_LOGI(TAG, "Recording stopped via button");
+                } else {
+                    recorder::start();
+                    ESP_LOGI(TAG, "Recording started via button");
+                }
+            }
+        }
+        // Refresh screen every 500ms (every 10th iteration)
+        if (++count >= 10) {
+            display::refresh();
+            count = 0;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+// ============================================================================
+// Recorder tick task
+// ============================================================================
+
+static void recorderTask(void* param) {
+    ESP_LOGI(TAG, "Recorder task started");
+    while (true) {
+        recorder::tick();
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_SIMULATOR_RECORD_INTERVAL_MS));
+    }
+}
+
+// ============================================================================
 // Entry point
 // ============================================================================
 
@@ -70,6 +114,12 @@ extern "C" void app_main(void) {
 
     // Initialize playback engine
     playback::init();
+
+    // Initialize recorder (SPIFFS)
+    recorder::init();
+
+    // Initialize display (LCD + button)
+    display::init();
 
     // Initialize Modbus slave
     err = mb_slave::init();
@@ -95,6 +145,12 @@ extern "C" void app_main(void) {
 
     // Start playback task
     xTaskCreatePinnedToCore(playbackTask, "playback", 4096, nullptr, 3, nullptr, 0);
+
+    // Start display task
+    xTaskCreatePinnedToCore(displayTask, "display", 4096, nullptr, 2, nullptr, 0);
+
+    // Start recorder task
+    xTaskCreatePinnedToCore(recorderTask, "recorder", 4096, nullptr, 2, nullptr, 0);
 
     ESP_LOGI(TAG, "Simulator ready");
     ESP_LOGI(TAG, "  Modbus: %s (slave addr %d, 2400 8E1)",

@@ -62,3 +62,82 @@ menu "Arctic Simulator Configuration"
             Modbus slave address. The Arctic heat pump uses address 1.
 
 endmenu
+
+menu "Display & Button"
+
+    config SIMULATOR_LCD_MOSI
+        int "LCD MOSI GPIO"
+        default 21
+        help
+            SPI MOSI pin for the GC9107 LCD.
+
+    config SIMULATOR_LCD_CLK
+        int "LCD CLK GPIO"
+        default 15
+        help
+            SPI CLK pin for the GC9107 LCD.
+
+    config SIMULATOR_LCD_CS
+        int "LCD CS GPIO"
+        default 14
+        help
+            SPI chip-select pin for the GC9107 LCD.
+
+    config SIMULATOR_LCD_DC
+        int "LCD DC (Data/Command) GPIO"
+        default 42
+        help
+            Data/Command pin for the GC9107 LCD.
+
+    config SIMULATOR_LCD_RST
+        int "LCD Reset GPIO"
+        default 48
+        help
+            Hardware-reset pin for the GC9107 LCD.
+
+    config SIMULATOR_LCD_BL
+        int "LCD Backlight GPIO (fallback)"
+        default 16
+        help
+            GPIO pin for backlight on Atom S3 (non-I2C variant).
+            Used only when I2C backlight is disabled or fails.
+
+    config SIMULATOR_LCD_BL_I2C
+        bool "Use I2C backlight controller (Atom S3R)"
+        default y
+        help
+            Enable I2C-based LED backlight controller at address 0x30.
+            Disable for plain Atom S3 which uses a simple GPIO.
+
+    config SIMULATOR_LCD_BL_I2C_SDA
+        int "I2C backlight SDA GPIO"
+        default 45
+        depends on SIMULATOR_LCD_BL_I2C
+        help
+            SDA pin for the I2C backlight controller.
+
+    config SIMULATOR_LCD_BL_I2C_SCL
+        int "I2C backlight SCL GPIO"
+        default 0
+        depends on SIMULATOR_LCD_BL_I2C
+        help
+            SCL pin for the I2C backlight controller.
+
+    config SIMULATOR_BTN_GPIO
+        int "Front button GPIO"
+        default 41
+        help
+            GPIO pin for the front-face button (active-low).
+
+endmenu
+
+menu "Recorder"
+
+    config SIMULATOR_RECORD_INTERVAL_MS
+        int "Recording interval (ms)"
+        default 500
+        range 100 5000
+        help
+            How often to snapshot register values while recording.
+
+endmenu
