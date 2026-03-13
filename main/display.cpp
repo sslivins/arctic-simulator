@@ -14,7 +14,6 @@
 #include "display.h"
 #include "register_map.h"
 #include "modbus_slave.h"
-#include "recorder.h"
 #include "playback.h"
 #include "wifi_manager.h"
 
@@ -316,6 +315,19 @@ static void fbCircleRing(int cx, int cy, int r_outer, int r_inner,
 // Blink state — toggled each refresh (~500 ms)
 static bool s_blink_on = true;
 
+// ── Change detection state ─────────────────────────────────────────────
+static uint16_t s_prev_on_off   = 0xFFFF;  // force initial display
+static uint16_t s_prev_mode     = 0xFFFF;
+static uint16_t s_prev_ec1      = 0;
+static uint16_t s_prev_ec2      = 0;
+static uint16_t s_prev_ec3      = 0;
+static uint16_t s_prev_status2  = 0;
+
+// Current notification — persists until next change
+static char     s_notif_line1[22] = "";   // fits 21 chars at 1x scale
+static char     s_notif_line2[22] = "";
+static uint16_t s_notif_color     = COL_WHITE;
+
 // ============================================================================
 // UI rendering
 // ============================================================================
@@ -346,9 +358,112 @@ static void renderProvisioningUI() {
     fbDrawStrCentered(94, "192.168.4.1", COL_YELLOW, COL_BLACK, 1);
 }
 
-/// Normal mode — big record button.
+/// Map mode number to short display name.
+static const char* modeLabel(uint16_t mode) {
+    switch (mode) {
+    case reg::MODE_COOLING:       return "Cooling";
+    case reg::MODE_FLOOR_HEATING: return "Floor Heat";
+    case reg::MODE_FAN_COIL_HEAT: return "Fan Coil Heat";
+    case reg::MODE_HOT_WATER:     return "Hot Water";
+    case reg::MODE_AUTO:          return "Auto";
+    default:                      return "Unknown";
+    }
+}
+
+/// Check key registers for changes and update notification.
+static void detectChanges() {
+    uint16_t on_off  = reg::get(reg::UNIT_ON_OFF);
+    uint16_t mode    = reg::get(reg::WORKING_MODE);
+    uint16_t ec1     = reg::get(reg::ERROR_CODE_1);
+    uint16_t ec2     = reg::get(reg::ERROR_CODE_2);
+    uint16_t ec3     = reg::get(reg::ERROR_CODE_3);
+    uint16_t sts2    = reg::get(reg::STATUS_2);
+
+    bool changed = false;
+
+    // Errors take priority — show the first one that changed
+    if (ec1 != s_prev_ec1 || ec2 != s_prev_ec2 || ec3 != s_prev_ec3) {
+        uint16_t any_err = ec1 | ec2 | ec3;
+        if (any_err) {
+            // Find one representative error code for display
+            const char* label = "Error";
+            if (ec1) label = "Sensor Error";
+            if (ec2) label = "System Error";
+            if (ec3) label = "Protection Err";
+            snprintf(s_notif_line1, sizeof(s_notif_line1), "%s", label);
+            snprintf(s_notif_line2, sizeof(s_notif_line2),
+                     "EC: %04X/%04X/%04X", ec1, ec2, ec3);
+            s_notif_color = COL_RED;
+        } else {
+            snprintf(s_notif_line1, sizeof(s_notif_line1), "Errors Cleared");
+            s_notif_line2[0] = '\0';
+            s_notif_color = COL_GREEN;
+        }
+        changed = true;
+    }
+
+    // Unit on/off change
+    if (!changed && on_off != s_prev_on_off) {
+        snprintf(s_notif_line1, sizeof(s_notif_line1),
+                 "Unit %s", on_off ? "ON" : "OFF");
+        s_notif_line2[0] = '\0';
+        s_notif_color = on_off ? COL_GREEN : COL_ORANGE;
+        changed = true;
+    }
+
+    // Working mode change
+    if (!changed && mode != s_prev_mode) {
+        snprintf(s_notif_line1, sizeof(s_notif_line1), "Mode Changed");
+        snprintf(s_notif_line2, sizeof(s_notif_line2), "%s", modeLabel(mode));
+        s_notif_color = COL_CYAN;
+        changed = true;
+    }
+
+    // Status2 bit changes (compressor, pump, heater, etc.)
+    if (!changed && sts2 != s_prev_status2) {
+        uint16_t diff = sts2 ^ s_prev_status2;
+        // Show first interesting bit that changed
+        const char* what = nullptr;
+        bool is_on = false;
+        struct { uint16_t bit; const char* name; } bits[] = {
+            { reg::STS2_COMPRESSOR,   "Compressor" },
+            { reg::STS2_WATER_PUMP,   "Water Pump" },
+            { reg::STS2_ELEC_HEATER,  "Elec Heater" },
+            { reg::STS2_4WAY_VALVE,   "4-Way Valve" },
+            { reg::STS2_WATER_FLOW,   "Water Flow" },
+            { reg::STS2_HP_SWITCH,    "HP Switch" },
+            { reg::STS2_LP_SWITCH,    "LP Switch" },
+        };
+        for (auto& b : bits) {
+            if (diff & b.bit) {
+                what = b.name;
+                is_on = (sts2 & b.bit) != 0;
+                break;
+            }
+        }
+        if (what) {
+            snprintf(s_notif_line1, sizeof(s_notif_line1), "%s", what);
+            snprintf(s_notif_line2, sizeof(s_notif_line2), "%s", is_on ? "ON" : "OFF");
+            s_notif_color = is_on ? COL_GREEN : COL_DARK_GRAY;
+            changed = true;
+        }
+    }
+
+    s_prev_on_off  = on_off;
+    s_prev_mode    = mode;
+    s_prev_ec1     = ec1;
+    s_prev_ec2     = ec2;
+    s_prev_ec3     = ec3;
+    s_prev_status2 = sts2;
+
+    (void)changed;
+}
+
+/// Normal mode — show title + latest status/error notification.
 static void renderNormalUI() {
     const esp_app_desc_t* app = esp_app_get_description();
+
+    detectChanges();
 
     fbClear(COL_BLACK);
 
@@ -360,59 +475,30 @@ static void renderNormalUI() {
     snprintf(ver, sizeof(ver), "v%s", app->version);
     fbDrawStrCentered(22, ver, COL_GRAY, COL_BLACK, 1);
 
-    if (recorder::isAvailable()) {
-        // ── Big record button (iPhone-style) ───────────────────────────
-        const int cx = LCD_W / 2;   // 64
-        const int cy = 80;          // vertical center of button area
-        const int r_fill = 32;      // inner filled circle
-        const int r_ring = 36;      // outer ring
-        const int ring_w = 3;       // ring thickness
+    // Separator
+    fbHLine(16, 36, LCD_W - 32, COL_DARK_GRAY);
 
-        // Outer white ring — always visible
-        fbCircleRing(cx, cy, r_ring, r_ring - ring_w, COL_WHITE);
+    // Status summary line — mode + on/off
+    uint16_t on_off = reg::get(reg::UNIT_ON_OFF);
+    uint16_t mode   = reg::get(reg::WORKING_MODE);
+    char summary[22];
+    snprintf(summary, sizeof(summary), "%s %s",
+             modeLabel(mode), on_off ? "ON" : "OFF");
+    fbDrawStrCentered(42, summary, on_off ? COL_GREEN : COL_ORANGE,
+                      COL_BLACK, 1);
 
-        // Red filled circle — solid when idle, blinks when recording
-        bool recording = recorder::isRecording();
-        if (!recording || s_blink_on) {
-            fbFillCircle(cx, cy, r_fill, COL_RED);
+    // Notification area (center of screen)
+    if (s_notif_line1[0]) {
+        fbDrawStrCentered(68, s_notif_line1, s_notif_color, COL_BLACK, 2);
+        if (s_notif_line2[0]) {
+            fbDrawStrCentered(90, s_notif_line2, s_notif_color, COL_BLACK, 1);
         }
+    }
 
-        // Toggle blink for next refresh cycle
-        if (recording) {
-            s_blink_on = !s_blink_on;
-        } else {
-            s_blink_on = true;
-        }
-
-        // ── Storage bar (bottom of screen) ─────────────────────────────
-        auto rec = recorder::getStatus();
-        if (rec.bytes_total > 0) {
-            const int bar_x = 10;
-            const int bar_w = LCD_W - 20;      // 108 px
-            const int bar_y = LCD_H - 8;       // y = 120
-            const int bar_h = 4;
-
-            // Outline
-            fbHLine(bar_x, bar_y - 1,     bar_w, COL_DARK_GRAY);
-            fbHLine(bar_x, bar_y + bar_h, bar_w, COL_DARK_GRAY);
-
-            float pct = (float)rec.bytes_used / (float)rec.bytes_total;
-            if (pct > 1.0f) pct = 1.0f;
-            int fill_w = (int)(pct * bar_w);
-
-            // Color: green < 60%, yellow < 85%, red >= 85%
-            uint16_t bar_col = COL_GREEN;
-            if (pct >= 0.85f) bar_col = COL_RED;
-            else if (pct >= 0.60f) bar_col = COL_YELLOW;
-
-            if (fill_w > 0) {
-                fbFillRect(bar_x, bar_y, fill_w, bar_h, bar_col);
-            }
-        }
-    } else {
-        // ── No PSRAM — show web-mode indicator ─────────────────────────
-        fbDrawStrCentered(60, "Web Mode", COL_CYAN, COL_BLACK, 2);
-        fbDrawStrCentered(86, "Stream via API", COL_DARK_GRAY, COL_BLACK, 1);
+    // IP at bottom
+    if (wifi::isConnected()) {
+        fbDrawStrCentered(LCD_H - 12, wifi::getIPAddress(),
+                          COL_DARK_GRAY, COL_BLACK, 1);
     }
 }
 

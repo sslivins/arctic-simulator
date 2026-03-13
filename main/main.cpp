@@ -16,7 +16,6 @@
 #include "playback.h"
 #include "wifi_manager.h"
 #include "display.h"
-#include "recorder.h"
 
 #include "esp_log.h"
 #include "esp_app_desc.h"
@@ -60,36 +59,13 @@ static void displayTask(void* param) {
     int count = 0;
     while (true) {
         // Poll button every 50ms
-        if (display::checkButton()) {
-            // Toggle recording on button press (only when recorder available + normal mode)
-            if (recorder::isAvailable() && wifi::getMode() != wifi::Mode::PROVISIONING) {
-                if (recorder::isRecording()) {
-                    recorder::stop();
-                    ESP_LOGI(TAG, "Recording stopped via button");
-                } else {
-                    recorder::start();
-                    ESP_LOGI(TAG, "Recording started via button");
-                }
-            }
-        }
+        display::checkButton();
         // Refresh screen every 500ms (every 10th iteration)
         if (++count >= 10) {
             display::refresh();
             count = 0;
         }
         vTaskDelay(pdMS_TO_TICKS(50));
-    }
-}
-
-// ============================================================================
-// Recorder tick task
-// ============================================================================
-
-static void recorderTask(void* param) {
-    ESP_LOGI(TAG, "Recorder task started");
-    while (true) {
-        recorder::tick();
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_SIMULATOR_RECORD_INTERVAL_MS));
     }
 }
 
@@ -114,14 +90,6 @@ extern "C" void app_main(void) {
 
     // Initialize playback engine
     playback::init();
-
-    // Initialize recorder (PSRAM buffer — S3R only)
-    err = recorder::init();
-    if (err == ESP_ERR_NOT_SUPPORTED) {
-        ESP_LOGI(TAG, "No PSRAM — local recording disabled (use web streaming)");
-    } else if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Recorder init failed: %s", esp_err_to_name(err));
-    }
 
     // Initialize display (LCD + button)
     display::init();
@@ -153,11 +121,6 @@ extern "C" void app_main(void) {
 
     // Start display task
     xTaskCreatePinnedToCore(displayTask, "display", 4096, nullptr, 2, nullptr, 0);
-
-    // Start recorder task (only when PSRAM available)
-    if (recorder::isAvailable()) {
-        xTaskCreatePinnedToCore(recorderTask, "recorder", 4096, nullptr, 2, nullptr, 0);
-    }
 
     ESP_LOGI(TAG, "Simulator ready");
     ESP_LOGI(TAG, "  Modbus: %s (slave addr %d, 2400 8E1)",

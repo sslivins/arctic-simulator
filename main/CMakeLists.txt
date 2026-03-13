@@ -51,7 +51,6 @@ idf_component_register(
         "dns_server.cpp"
         "simulation.cpp"
         "display.cpp"
-        "recorder.cpp"
     INCLUDE_DIRS
         "."
     EMBED_FILES

@@ -132,14 +132,3 @@ menu "Display & Button"
             GPIO pin for the front-face button (active-low).
 
 endmenu
-
-menu "Recorder"
-
-    config SIMULATOR_RECORD_INTERVAL_MS
-        int "Recording interval (ms)"
-        default 500
-        range 100 5000
-        help
-            How often to snapshot register values while recording.
-
-endmenu
