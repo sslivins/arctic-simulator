@@ -48,6 +48,9 @@ const char* getIPAddress();
 /// SoftAP SSID (only meaningful when provisioning).
 const char* getAPName();
 
+/// mDNS hostname (e.g. "arctic-sim-a1b2c3").
+const char* getHostname();
+
 /// Erase stored WiFi credentials from NVS.  The caller should reboot
 /// afterward so the device re-enters provisioning mode.
 esp_err_t eraseCredentials();

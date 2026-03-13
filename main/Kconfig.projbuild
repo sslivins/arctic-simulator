@@ -23,10 +23,12 @@ menu "Arctic Simulator Configuration"
             credentials and reboot into provisioning (SoftAP) mode.
 
     config SIMULATOR_MDNS_HOSTNAME
-        string "mDNS Hostname"
+        string "mDNS Hostname (base)"
         default "arctic-sim"
         help
-            mDNS hostname (accessible as arctic-sim.local).
+            Base mDNS hostname. On boot the device probes the network
+            for collisions and appends a suffix if needed:
+            arctic-sim.local, arctic-sim-2.local, arctic-sim-3.local, …
 
     config SIMULATOR_RS485_TX_PIN
         int "RS-485 TX GPIO"

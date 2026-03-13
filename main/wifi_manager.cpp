@@ -55,6 +55,7 @@ static int  s_retry_count = 0;
 static Mode s_mode        = Mode::IDLE;
 static char s_ip_str[16]  = "0.0.0.0";
 static char s_ap_name[33] = "ArcticSim";
+static char s_hostname[64] = "";  // resolved mDNS hostname
 
 static esp_netif_t* s_sta_netif = nullptr;
 static esp_netif_t* s_ap_netif  = nullptr;
@@ -130,12 +131,33 @@ static void staEventHandler(void* arg, esp_event_base_t base,
 // ============================================================================
 
 static void startMDNS() {
-    if (mdns_init() == ESP_OK) {
-        mdns_hostname_set(CONFIG_SIMULATOR_MDNS_HOSTNAME);
-        mdns_instance_name_set("Arctic Heat Pump Simulator");
-        mdns_service_add(nullptr, "_http", "_tcp", 80, nullptr, 0);
-        ESP_LOGI(TAG, "mDNS: %s.local", CONFIG_SIMULATOR_MDNS_HOSTNAME);
+    if (mdns_init() != ESP_OK) return;
+
+    const char* base = CONFIG_SIMULATOR_MDNS_HOSTNAME;
+    char candidate[64];
+    esp_ip4_addr_t addr;
+
+    // Try the base name first, then base-2, base-3, …
+    for (int i = 1; i <= 9; i++) {
+        if (i == 1)
+            snprintf(candidate, sizeof(candidate), "%s", base);
+        else
+            snprintf(candidate, sizeof(candidate), "%s-%d", base, i);
+
+        // Probe the network — short timeout (250 ms)
+        esp_err_t err = mdns_query_a(candidate, 250, &addr);
+        if (err == ESP_ERR_NOT_FOUND) {
+            // Nobody answered → name is available
+            break;
+        }
+        ESP_LOGI(TAG, "mDNS: %s.local already taken, trying next", candidate);
     }
+
+    mdns_hostname_set(candidate);
+    strncpy(s_hostname, candidate, sizeof(s_hostname) - 1);
+    mdns_instance_name_set("Arctic Heat Pump Simulator");
+    mdns_service_add(nullptr, "_http", "_tcp", 80, nullptr, 0);
+    ESP_LOGI(TAG, "mDNS: %s.local", candidate);
 }
 
 // ============================================================================
@@ -388,6 +410,7 @@ Mode getMode()              { return s_mode; }
 bool isConnected()          { return s_mode == Mode::CONNECTED; }
 const char* getIPAddress()  { return s_ip_str; }
 const char* getAPName()     { return s_ap_name; }
+const char* getHostname()   { return s_hostname; }
 
 esp_err_t eraseCredentials() {
     nvs_handle_t h;
