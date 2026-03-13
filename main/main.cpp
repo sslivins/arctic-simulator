@@ -15,6 +15,7 @@
 #include "api_server.h"
 #include "playback.h"
 #include "wifi_manager.h"
+#include "display.h"
 
 #include "esp_log.h"
 #include "esp_app_desc.h"
@@ -50,6 +51,25 @@ static void playbackTask(void* param) {
 }
 
 // ============================================================================
+// Display refresh + button polling task
+// ============================================================================
+
+static void displayTask(void* param) {
+    ESP_LOGI(TAG, "Display task started");
+    int count = 0;
+    while (true) {
+        // Poll button every 50ms
+        display::checkButton();
+        // Refresh screen every 500ms (every 10th iteration)
+        if (++count >= 10) {
+            display::refresh();
+            count = 0;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+// ============================================================================
 // Entry point
 // ============================================================================
 
@@ -71,6 +91,9 @@ extern "C" void app_main(void) {
     // Initialize playback engine
     playback::init();
 
+    // Initialize display (LCD + button)
+    display::init();
+
     // Initialize Modbus slave
     err = mb_slave::init();
     if (err != ESP_OK) {
@@ -80,23 +103,33 @@ extern "C" void app_main(void) {
         xTaskCreatePinnedToCore(modbusTask, "modbus", 4096, nullptr, 5, nullptr, 1);
     }
 
-    // Connect to WiFi
+    // Connect to WiFi (or start provisioning portal)
     err = wifi::init();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "WiFi failed — API will not be available");
-    } else {
-        // Start HTTP API server
+    if (err == ESP_OK) {
+        // STA connected — start the main API server
         api::start();
         ESP_LOGI(TAG, "API available at http://%s/api/status", wifi::getIPAddress());
+    } else if (err == ESP_ERR_NOT_FINISHED) {
+        // Provisioning mode — captive portal is already running
+        ESP_LOGI(TAG, "WiFi provisioning active — connect to '%s'", wifi::getAPName());
+    } else {
+        ESP_LOGE(TAG, "WiFi failed — API will not be available");
     }
 
     // Start playback task
     xTaskCreatePinnedToCore(playbackTask, "playback", 4096, nullptr, 3, nullptr, 0);
 
+    // Start display task
+    xTaskCreatePinnedToCore(displayTask, "display", 4096, nullptr, 2, nullptr, 0);
+
     ESP_LOGI(TAG, "Simulator ready");
     ESP_LOGI(TAG, "  Modbus: %s (slave addr %d, 2400 8E1)",
              mb_slave::isInitialized() ? "active" : "inactive",
              CONFIG_SIMULATOR_MODBUS_SLAVE_ADDR);
-    ESP_LOGI(TAG, "  WiFi:   %s", wifi::isConnected() ? wifi::getIPAddress() : "disconnected");
+    if (wifi::getMode() == wifi::Mode::PROVISIONING) {
+        ESP_LOGI(TAG, "  WiFi:   provisioning (AP: %s)", wifi::getAPName());
+    } else {
+        ESP_LOGI(TAG, "  WiFi:   %s", wifi::isConnected() ? wifi::getIPAddress() : "disconnected");
+    }
     ESP_LOGI(TAG, "  API:    %s", api::isRunning() ? "running" : "stopped");
 }

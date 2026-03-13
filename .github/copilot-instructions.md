@@ -141,6 +141,28 @@ idf.py reconfigure
 idf.py build
 ```
 
+### sdkconfig vs sdkconfig.defaults
+
+There are two Kconfig files — know which one to edit:
+
+| File | Tracked | Purpose |
+|------|---------|---------|
+| `sdkconfig.defaults` | **Yes** (committed) | Checked-in build defaults. Edit **this** file when adding or changing Kconfig options. |
+| `sdkconfig` | **No** (git-ignored) | Auto-generated full config. Never edit by hand; it is rebuilt from defaults during `idf.py reconfigure`. |
+
+**Important**: `sdkconfig.defaults` only seeds keys that are *missing* from
+`sdkconfig`. If `sdkconfig` already contains a conflicting value, changing
+`sdkconfig.defaults` alone will **not** take effect. After modifying
+`sdkconfig.defaults`, always delete `sdkconfig` and reconfigure:
+
+```bash
+rm sdkconfig          # PowerShell: Remove-Item sdkconfig
+idf.py reconfigure
+idf.py build
+```
+
+Do **not** commit `sdkconfig` — it is in `.gitignore`.
+
 ## After Major Changes — Checklist
 
 - [ ] Keep register map in sync with `arctic-controller/docs/ARCTIC-MODBUS-PROTOCOL.md`

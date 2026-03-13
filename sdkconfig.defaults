@@ -4,16 +4,16 @@ CONFIG_IDF_TARGET="esp32s3"
 # Serial flasher - Atom S3 uses USB-CDC
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
-# Wi-Fi
-CONFIG_ESP_WIFI_SSID=""
-CONFIG_ESP_WIFI_PASSWORD=""
+# Wi-Fi — leave empty; credentials are set via the captive portal
+# and stored in NVS.  Kconfig fallback values are in Kconfig.projbuild.
+CONFIG_SIMULATOR_WIFI_SSID=""
+CONFIG_SIMULATOR_WIFI_PASSWORD=""
 
 # HTTP Server
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
 
 # mDNS
-CONFIG_MDNS_ENABLED=y
 
 # FreeRTOS
 CONFIG_FREERTOS_HZ=1000
@@ -25,6 +25,14 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Log level
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# PSRAM — enable so S3R can use its 8 MB for the recorder buffer.
+# IGNORE_NOTFOUND lets the regular S3 (no PSRAM chip) boot normally;
+# heap_caps_get_total_size(MALLOC_CAP_SPIRAM) simply returns 0.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 
 # UART for Modbus
 CONFIG_UART_ISR_IN_IRAM=y

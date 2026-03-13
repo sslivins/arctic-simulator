@@ -77,6 +77,15 @@ textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background:
 /* Modbus stats */
 .stats { display: flex; gap: 16px; font-size: 0.85em; color: #888; }
 
+/* Recorder / Stream */
+.rec-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rec-controls button { padding: 6px 14px; border: 1px solid #444; border-radius: 4px; background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 0.85em; }
+.rec-controls button:hover { background: #2a3a5e; }
+.rec-controls button.recording { border-color: #ef5350; color: #ef5350; animation: rec-pulse 1s infinite; }
+@keyframes rec-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.rec-info { font-size: 0.85em; color: #888; margin-top: 6px; }
+.rec-info span { color: #90caf9; }
+
 /* Toast */
 .toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 16px; border-radius: 6px; color: #fff; font-size: 0.85em; opacity: 0; transition: opacity 0.3s; z-index: 100; }
 .toast.show { opacity: 1; }
@@ -143,6 +152,17 @@ textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background:
     <span class="state" id="playback-state">idle</span>
   </div>
   <textarea id="capture-data" placeholder="Paste JSONL capture data here..."></textarea>
+</div>
+
+<!-- Stream (SSE — works on all devices, no PSRAM needed) -->
+<h2>Stream</h2>
+<div class="card">
+  <div class="rec-controls">
+    <button id="stream-toggle" onclick="toggleStream()">📡 Stream</button>
+    <button onclick="downloadStreamData()">💾 Download</button>
+    <button onclick="clearStreamData()">🗑 Clear</button>
+  </div>
+  <div class="rec-info" id="stream-info">Stream register data in real-time to your browser</div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -488,6 +508,87 @@ async function stopPlayback() {
     toast('Playback stopped');
     refresh();
   } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+// ============================================================================
+// SSE Stream
+// ============================================================================
+let streamSource = null;
+let streamLines = [];
+let streamBytes = 0;
+let streamStartTime = null;
+let streamTimer = null;
+
+function toggleStream() {
+  if (streamSource) stopStream(); else startStream();
+}
+
+function startStream() {
+  if (streamSource) return;
+  streamLines = [];
+  streamBytes = 0;
+  streamStartTime = Date.now();
+  streamSource = new EventSource(BASE + '/api/stream');
+  streamSource.onmessage = function(e) {
+    streamLines.push(e.data);
+    streamBytes += e.data.length + 1;
+    updateStreamUI();
+  };
+  streamSource.onerror = function() {
+    streamSource.close();
+    streamSource = null;
+    if (streamTimer) { clearInterval(streamTimer); streamTimer = null; }
+    updateStreamUI();
+    if (streamLines.length === 0) toast('Stream disconnected', true);
+  };
+  streamTimer = setInterval(updateStreamUI, 1000);
+  updateStreamUI();
+  toast('Streaming started');
+}
+
+function stopStream() {
+  if (streamSource) { streamSource.close(); streamSource = null; }
+  if (streamTimer) { clearInterval(streamTimer); streamTimer = null; }
+  fetch(BASE + '/api/stream/stop', { method: 'POST' }).catch(() => {});
+  updateStreamUI();
+}
+
+function downloadStreamData() {
+  if (streamLines.length === 0) { toast('No data to download', true); return; }
+  const blob = new Blob([streamLines.join('\\n') + '\\n'], { type: 'application/x-ndjson' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'capture.jsonl';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function clearStreamData() {
+  streamLines = [];
+  streamBytes = 0;
+  updateStreamUI();
+  toast('Stream buffer cleared');
+}
+
+function updateStreamUI() {
+  const btn = document.getElementById('stream-toggle');
+  const active = !!streamSource;
+  btn.textContent = active ? '⏹ Stop' : '📡 Stream';
+  btn.classList.toggle('recording', active);
+  const info = document.getElementById('stream-info');
+  if (active) {
+    const elapsed = Math.round((Date.now() - streamStartTime) / 1000);
+    const min = Math.floor(elapsed / 60);
+    const sec = elapsed % 60;
+    const kb = (streamBytes / 1024).toFixed(1);
+    info.textContent = 'Streaming \u2014 ' + streamLines.length + ' entries, ' + kb + ' KB, ' + min + ':' + (sec < 10 ? '0' : '') + sec + ' elapsed';
+  } else if (streamLines.length > 0) {
+    const kb = (streamBytes / 1024).toFixed(1);
+    info.textContent = 'Stopped \u2014 ' + streamLines.length + ' entries, ' + kb + ' KB';
+  } else {
+    info.textContent = 'Stream register data in real-time to your browser';
+  }
 }
 
 // ============================================================================
