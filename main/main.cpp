@@ -61,8 +61,8 @@ static void displayTask(void* param) {
     while (true) {
         // Poll button every 50ms
         if (display::checkButton()) {
-            // Toggle recording on button press (only in normal mode)
-            if (wifi::getMode() != wifi::Mode::PROVISIONING) {
+            // Toggle recording on button press (only when recorder available + normal mode)
+            if (recorder::isAvailable() && wifi::getMode() != wifi::Mode::PROVISIONING) {
                 if (recorder::isRecording()) {
                     recorder::stop();
                     ESP_LOGI(TAG, "Recording stopped via button");
@@ -115,8 +115,13 @@ extern "C" void app_main(void) {
     // Initialize playback engine
     playback::init();
 
-    // Initialize recorder (SPIFFS)
-    recorder::init();
+    // Initialize recorder (PSRAM buffer — S3R only)
+    err = recorder::init();
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGI(TAG, "No PSRAM — local recording disabled (use web streaming)");
+    } else if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Recorder init failed: %s", esp_err_to_name(err));
+    }
 
     // Initialize display (LCD + button)
     display::init();
@@ -149,8 +154,10 @@ extern "C" void app_main(void) {
     // Start display task
     xTaskCreatePinnedToCore(displayTask, "display", 4096, nullptr, 2, nullptr, 0);
 
-    // Start recorder task
-    xTaskCreatePinnedToCore(recorderTask, "recorder", 4096, nullptr, 2, nullptr, 0);
+    // Start recorder task (only when PSRAM available)
+    if (recorder::isAvailable()) {
+        xTaskCreatePinnedToCore(recorderTask, "recorder", 4096, nullptr, 2, nullptr, 0);
+    }
 
     ESP_LOGI(TAG, "Simulator ready");
     ESP_LOGI(TAG, "  Modbus: %s (slave addr %d, 2400 8E1)",

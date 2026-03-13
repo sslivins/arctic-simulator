@@ -1,12 +1,12 @@
 /*
- * Local Register Recorder
+ * Register Recorder (PSRAM)
  *
- * Periodically captures all Modbus register values and writes them
- * to a JSONL file on the SPIFFS partition.  The resulting file is
- * directly compatible with the playback engine.
+ * On devices with PSRAM (Atom S3R) this allocates a memory buffer
+ * and writes periodic register snapshots in JSONL format.  The data
+ * can be downloaded via the REST API.
  *
- * Storage lives on the "storage" SPIFFS partition which is 2 MB on
- * the 4 MB Atom S3 and ~6 MB on the 8 MB Atom S3R.
+ * On devices without PSRAM (Atom S3) the recorder is unavailable;
+ * the web interface should stream registers directly to the client.
  */
 #pragma once
 
@@ -18,14 +18,19 @@ namespace recorder {
 
 struct Status {
     bool     recording;
+    bool     available;    // true when PSRAM is present
     uint32_t entries;
     uint32_t elapsed_ms;
-    size_t   bytes_used;   // bytes written to current file
-    size_t   bytes_total;  // total SPIFFS capacity
+    size_t   bytes_used;   // bytes written to buffer
+    size_t   bytes_total;  // buffer capacity
 };
 
-// Mount SPIFFS and prepare the subsystem.
+// Probe PSRAM, allocate buffer.  Safe to call on any variant —
+// returns ESP_ERR_NOT_SUPPORTED when no PSRAM is found.
 esp_err_t init();
+
+// True if the device has PSRAM and the buffer was allocated.
+bool isAvailable();
 
 // Start / stop recording.
 esp_err_t start();
@@ -41,10 +46,11 @@ void tick();
 // Current status.
 Status getStatus();
 
-// Delete the recording file to reclaim storage.
-esp_err_t deleteData();
+// Discard recorded data.
+void clear();
 
-// Filesystem path of the recording file (for API download).
-const char* getFilePath();
+// Access the raw buffer for download (pointer + length).
+const uint8_t* bufferData();
+size_t          bufferSize();
 
 }  // namespace recorder

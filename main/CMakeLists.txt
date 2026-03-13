@@ -67,7 +67,6 @@ idf_component_register(
         json
         esp_timer
         vfs
-        spiffs
         lwip
         esp_lcd
 )

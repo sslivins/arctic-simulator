@@ -360,53 +360,59 @@ static void renderNormalUI() {
     snprintf(ver, sizeof(ver), "v%s", app->version);
     fbDrawStrCentered(22, ver, COL_GRAY, COL_BLACK, 1);
 
-    // ── Big record button (iPhone-style) ───────────────────────────────
-    const int cx = LCD_W / 2;   // 64
-    const int cy = 80;          // vertical center of button area
-    const int r_fill = 32;      // inner filled circle
-    const int r_ring = 36;      // outer ring
-    const int ring_w = 3;       // ring thickness
+    if (recorder::isAvailable()) {
+        // ── Big record button (iPhone-style) ───────────────────────────
+        const int cx = LCD_W / 2;   // 64
+        const int cy = 80;          // vertical center of button area
+        const int r_fill = 32;      // inner filled circle
+        const int r_ring = 36;      // outer ring
+        const int ring_w = 3;       // ring thickness
 
-    // Outer white ring — always visible
-    fbCircleRing(cx, cy, r_ring, r_ring - ring_w, COL_WHITE);
+        // Outer white ring — always visible
+        fbCircleRing(cx, cy, r_ring, r_ring - ring_w, COL_WHITE);
 
-    // Red filled circle — solid when idle, blinks when recording
-    bool recording = recorder::isRecording();
-    if (!recording || s_blink_on) {
-        fbFillCircle(cx, cy, r_fill, COL_RED);
-    }
-
-    // Toggle blink for next refresh cycle
-    if (recording) {
-        s_blink_on = !s_blink_on;
-    } else {
-        s_blink_on = true;
-    }
-
-    // ── Storage bar (bottom of screen) ─────────────────────────────────
-    auto rec = recorder::getStatus();
-    if (rec.bytes_total > 0) {
-        const int bar_x = 10;
-        const int bar_w = LCD_W - 20;      // 108 px
-        const int bar_y = LCD_H - 8;       // y = 120
-        const int bar_h = 4;
-
-        // Outline
-        fbHLine(bar_x, bar_y - 1,     bar_w, COL_DARK_GRAY);
-        fbHLine(bar_x, bar_y + bar_h, bar_w, COL_DARK_GRAY);
-
-        float pct = (float)rec.bytes_used / (float)rec.bytes_total;
-        if (pct > 1.0f) pct = 1.0f;
-        int fill_w = (int)(pct * bar_w);
-
-        // Color: green < 60%, yellow < 85%, red >= 85%
-        uint16_t bar_col = COL_GREEN;
-        if (pct >= 0.85f) bar_col = COL_RED;
-        else if (pct >= 0.60f) bar_col = COL_YELLOW;
-
-        if (fill_w > 0) {
-            fbFillRect(bar_x, bar_y, fill_w, bar_h, bar_col);
+        // Red filled circle — solid when idle, blinks when recording
+        bool recording = recorder::isRecording();
+        if (!recording || s_blink_on) {
+            fbFillCircle(cx, cy, r_fill, COL_RED);
         }
+
+        // Toggle blink for next refresh cycle
+        if (recording) {
+            s_blink_on = !s_blink_on;
+        } else {
+            s_blink_on = true;
+        }
+
+        // ── Storage bar (bottom of screen) ─────────────────────────────
+        auto rec = recorder::getStatus();
+        if (rec.bytes_total > 0) {
+            const int bar_x = 10;
+            const int bar_w = LCD_W - 20;      // 108 px
+            const int bar_y = LCD_H - 8;       // y = 120
+            const int bar_h = 4;
+
+            // Outline
+            fbHLine(bar_x, bar_y - 1,     bar_w, COL_DARK_GRAY);
+            fbHLine(bar_x, bar_y + bar_h, bar_w, COL_DARK_GRAY);
+
+            float pct = (float)rec.bytes_used / (float)rec.bytes_total;
+            if (pct > 1.0f) pct = 1.0f;
+            int fill_w = (int)(pct * bar_w);
+
+            // Color: green < 60%, yellow < 85%, red >= 85%
+            uint16_t bar_col = COL_GREEN;
+            if (pct >= 0.85f) bar_col = COL_RED;
+            else if (pct >= 0.60f) bar_col = COL_YELLOW;
+
+            if (fill_w > 0) {
+                fbFillRect(bar_x, bar_y, fill_w, bar_h, bar_col);
+            }
+        }
+    } else {
+        // ── No PSRAM — show web-mode indicator ─────────────────────────
+        fbDrawStrCentered(60, "Web Mode", COL_CYAN, COL_BLACK, 2);
+        fbDrawStrCentered(86, "Stream via API", COL_DARK_GRAY, COL_BLACK, 1);
     }
 }
 
