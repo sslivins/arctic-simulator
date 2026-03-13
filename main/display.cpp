@@ -382,6 +382,32 @@ static void renderNormalUI() {
     } else {
         s_blink_on = true;
     }
+
+    // ── Storage bar (bottom of screen) ─────────────────────────────────
+    auto rec = recorder::getStatus();
+    if (rec.bytes_total > 0) {
+        const int bar_x = 10;
+        const int bar_w = LCD_W - 20;      // 108 px
+        const int bar_y = LCD_H - 8;       // y = 120
+        const int bar_h = 4;
+
+        // Outline
+        fbHLine(bar_x, bar_y - 1,     bar_w, COL_DARK_GRAY);
+        fbHLine(bar_x, bar_y + bar_h, bar_w, COL_DARK_GRAY);
+
+        float pct = (float)rec.bytes_used / (float)rec.bytes_total;
+        if (pct > 1.0f) pct = 1.0f;
+        int fill_w = (int)(pct * bar_w);
+
+        // Color: green < 60%, yellow < 85%, red >= 85%
+        uint16_t bar_col = COL_GREEN;
+        if (pct >= 0.85f) bar_col = COL_RED;
+        else if (pct >= 0.60f) bar_col = COL_YELLOW;
+
+        if (fill_w > 0) {
+            fbFillRect(bar_x, bar_y, fill_w, bar_h, bar_col);
+        }
+    }
 }
 
 static void renderUI() {
