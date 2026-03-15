@@ -11,12 +11,21 @@
  * Call updateStatus() after any holding register modification (Modbus write
  * or REST API write).  Preset loads set STATUS_2 explicitly and should NOT
  * be followed by updateStatus() — they already contain the desired state.
+ *
+ * Simulation can be disabled (e.g. during capture playback) so that STATUS_2
+ * values from the capture file are preserved rather than being overwritten.
  */
 #pragma once
 
 namespace simulation {
 
-// Call after any holding register write to recompute status registers
+// Enable or disable the reactive simulation engine.
+// When disabled, updateStatus() becomes a no-op.
+void setEnabled(bool enabled);
+bool isEnabled();
+
+// Call after any holding register write to recompute status registers.
+// No-op when simulation is disabled.
 void updateStatus();
 
 }  // namespace simulation

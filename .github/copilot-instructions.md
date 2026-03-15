@@ -125,21 +125,24 @@ Default GPIO pins for Atom S3 + RS485 base (adjust via menuconfig):
 
 ### Web Dashboard (gzip rebuild)
 
-The dashboard HTML (`main/web/index.html`) is gzip-compressed and embedded in the
-firmware. The compression runs during **CMake configure** (not during ninja build),
-so editing the HTML and running `idf.py build` alone will **not** pick up changes.
+The dashboard HTML (`main/web/index.html`) and captive portal (`main/web/portal.html`)
+are gzip-compressed and embedded in the firmware. The compression runs during
+**CMake configure** (not during ninja build), so editing the HTML and running
+`idf.py build` alone will **not** pick up changes.
 
-After editing `main/web/index.html`, do one of:
+**IMPORTANT — Copilot rule**: After editing **any** file under `main/web/`, you
+**must** run the gzip script for each changed file before the user builds:
 
 ```bash
-# Option A: manually re-gzip then build
+# Dashboard
 python main/web/gzip_html.py main/web/index.html main/web/index.html.gz
-idf.py build
 
-# Option B: force CMake reconfigure (slower, re-runs full configure)
-idf.py reconfigure
-idf.py build
+# Captive portal
+python main/web/gzip_html.py main/web/portal.html main/web/portal.html.gz
 ```
+
+Do **not** skip this step or leave it to the user — run the appropriate gzip
+command(s) immediately after editing web files.
 
 ### sdkconfig vs sdkconfig.defaults
 
