@@ -65,6 +65,9 @@ h2 { color: #90caf9; font-size: 1.1em; margin: 16px 0 8px; border-bottom: 1px so
 .playback-controls button { padding: 6px 14px; border: 1px solid #444; border-radius: 4px; background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 0.85em; }
 .playback-controls button:hover { background: #2a3a5e; }
 .playback-controls .state { font-size: 0.85em; color: #90caf9; }
+.file-pick { padding: 6px 14px; border: 1px solid #444; border-radius: 4px; background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 0.85em; }
+.file-pick:hover { background: #2a3a5e; }
+.file-pick input[type=file] { display: none; }
 textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background: #0f3460; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; font-family: monospace; font-size: 0.8em; resize: vertical; }
 
 /* Errors */
@@ -146,12 +149,12 @@ textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background:
 <h2>Playback</h2>
 <div class="card">
   <div class="playback-controls">
-    <button onclick="startPlayback()">▶ Start</button>
-    <button onclick="stopPlayback()">⏹ Stop</button>
-    <button onclick="loadPlayback()">📂 Load</button>
+    <button id="play-btn" onclick="togglePlayback()" disabled>▶ Play</button>
+    <button id="stop-btn" onclick="stopPlayback()" disabled>⏹ Stop</button>
+    <label class="file-pick"><input type="file" id="capture-file" accept=".jsonl,.json,.txt" onchange="onCaptureFile(this)"> � Open Capture</label>
     <span class="state" id="playback-state">idle</span>
   </div>
-  <textarea id="capture-data" placeholder="Paste JSONL capture data here..."></textarea>
+  <div class="rec-info" id="playback-info">Load a JSONL capture file to replay register values</div>
 </div>
 
 <!-- Stream (SSE — works on all devices, no PSRAM needed) -->
@@ -394,8 +397,11 @@ async function refresh() {
       document.getElementById('version-info').textContent = 'v' + s.version;
       document.getElementById('modbus-stats').textContent =
         `Reads: ${s.modbus_stats.reads}  Writes: ${s.modbus_stats.writes}  Errors: ${s.modbus_stats.errors}`;
-      document.getElementById('playback-state').textContent =
-        `${s.playback.state} (${s.playback.position}/${s.playback.entries})`;
+      // Don't overwrite playback state when browser has a capture loaded
+      if (!pbTimer && pbEntries.length === 0) {
+        document.getElementById('playback-state').textContent =
+          `${s.playback.state} (${s.playback.position}/${s.playback.entries})`;
+      }
     }
 
     const regResp = await fetch(BASE + '/api/registers');
@@ -477,37 +483,120 @@ async function clearErrors() {
 }
 
 // ============================================================================
-// Playback
+// Playback (browser-driven — no device memory needed)
 // ============================================================================
-async function loadPlayback() {
-  const data = document.getElementById('capture-data').value.trim();
-  if (!data) { toast('Paste capture data first', true); return; }
-  try {
-    const r = await fetch(BASE + '/api/playback/load', {
-      method: 'POST', headers: {'Content-Type': 'text/plain'}, body: data
-    });
-    if (r.ok) {
-      const j = await r.json();
-      toast(`Loaded ${j.entries} entries`);
-      refresh();
-    } else { toast('Failed to load', true); }
-  } catch(e) { toast('Error: ' + e.message, true); }
+let pbEntries = [];      // parsed capture entries
+let pbIndex = 0;         // current entry
+let pbBaseTs = 0;        // first entry's timestamp
+let pbStartTime = 0;     // performance.now() when playback started
+let pbTimer = null;      // setTimeout handle
+let pbFileName = '';
+
+function onCaptureFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  pbFileName = file.name;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const lines = reader.result.split('\n').filter(l => l.trim());
+    pbEntries = [];
+    for (const line of lines) {
+      try { pbEntries.push(JSON.parse(line)); } catch(e) {}
+    }
+    if (pbEntries.length === 0) {
+      toast('No valid entries found', true);
+      return;
+    }
+    pbBaseTs = pbEntries[0].t || 0;
+    document.getElementById('playback-state').textContent = `loaded (${pbEntries.length} entries)`;
+    document.getElementById('playback-info').textContent = `${file.name} — ${pbEntries.length} entries ready`;
+    document.getElementById('play-btn').disabled = false;
+    document.getElementById('stop-btn').disabled = false;
+    toast(`Parsed ${pbEntries.length} entries from ${file.name}`);
+  };
+  reader.onerror = () => toast('Failed to read file', true);
+  reader.readAsText(file);
+}
+
+function togglePlayback() {
+  if (pbTimer) { pausePlayback(); return; }
+  startPlayback();
 }
 
 async function startPlayback() {
-  try {
-    const r = await fetch(BASE + '/api/playback/start', { method: 'POST' });
-    if (r.ok) { toast('Playback started'); refresh(); }
-    else { toast('Failed — load capture first', true); }
-  } catch(e) { toast('Error: ' + e.message, true); }
+  if (pbEntries.length === 0) { toast('Browse for a capture file first', true); return; }
+  // Disable simulation so captured STATUS_2 / input registers are preserved
+  try { await fetch(BASE + '/api/simulation', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{"enabled":false}' }); } catch(e) {}
+  pbIndex = 0;
+  pbStartTime = performance.now();
+  document.getElementById('play-btn').textContent = '⏸ Pause';
+  toast('Playback started (simulation disabled)');
+  scheduleNext();
+}
+
+function pausePlayback() {
+  if (pbTimer) { clearTimeout(pbTimer); pbTimer = null; }
+  document.getElementById('play-btn').textContent = '▶ Resume';
+  document.getElementById('playback-state').textContent =
+    `paused (${pbIndex}/${pbEntries.length})`;
+  toast('Playback paused');
 }
 
 async function stopPlayback() {
+  if (pbTimer) { clearTimeout(pbTimer); pbTimer = null; }
+  pbIndex = 0;
+  // Re-enable simulation engine
+  try { await fetch(BASE + '/api/simulation', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{"enabled":true}' }); } catch(e) {}
+  document.getElementById('play-btn').textContent = '▶ Play';
+  document.getElementById('playback-state').textContent =
+    pbEntries.length ? `loaded (${pbEntries.length} entries)` : 'idle';
+  toast('Playback stopped (simulation enabled)');
+}
+
+function scheduleNext() {
+  if (pbIndex >= pbEntries.length) {
+    document.getElementById('play-btn').textContent = '▶ Play';
+    document.getElementById('playback-state').textContent = 'complete';
+    toast('Playback complete');
+    pbTimer = null;
+    // Re-enable simulation engine
+    fetch(BASE + '/api/simulation', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{"enabled":true}' }).catch(()=>{});
+    return;
+  }
+  const entry = pbEntries[pbIndex];
+  const relMs = (entry.t || 0) - pbBaseTs;
+  const elapsed = performance.now() - pbStartTime;
+  const delay = Math.max(0, relMs - elapsed);
+  pbTimer = setTimeout(() => applyEntry(), delay);
+}
+
+async function applyEntry() {
+  pbTimer = null;
+  // Batch consecutive entries with the same timestamp
+  const batchTs = pbEntries[pbIndex].t;
+  const regs = {};
+  while (pbIndex < pbEntries.length && pbEntries[pbIndex].t === batchTs) {
+    const e = pbEntries[pbIndex];
+    if (e.values) {
+      for (let i = 0; i < e.values.length; i++) {
+        regs[String((e.addr || 0) + i)] = e.values[i];
+      }
+    } else if (e.value !== undefined) {
+      regs[String(e.addr || 0)] = e.value;
+    }
+    pbIndex++;
+  }
+  // Send bulk register write
   try {
-    await fetch(BASE + '/api/playback/stop', { method: 'POST' });
-    toast('Playback stopped');
-    refresh();
-  } catch(e) { toast('Error: ' + e.message, true); }
+    await fetch(BASE + '/api/registers/bulk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ registers: regs })
+    });
+  } catch(e) { /* keep going */ }
+  document.getElementById('playback-state').textContent =
+    `playing (${pbIndex}/${pbEntries.length})`;
+  scheduleNext();
 }
 
 // ============================================================================

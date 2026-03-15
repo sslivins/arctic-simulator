@@ -191,27 +191,6 @@ static void fbHLine(int x, int y, int w, uint16_t color) {
         if (i >= 0) s_fb[y * LCD_W + i] = color;
 }
 
-static void fbDrawChar(int x, int y, char c, uint16_t fg, uint16_t bg) {
-    if (c < 32 || c > 126) c = '?';
-    const uint8_t* glyph = &FONT_5x7[(c - 32) * 5];
-    for (int col = 0; col < 5; col++) {
-        uint8_t bits = glyph[col];
-        for (int row = 0; row < 7; row++) {
-            int px = x + col;
-            int py = y + row;
-            if (px >= 0 && px < LCD_W && py >= 0 && py < LCD_H)
-                s_fb[py * LCD_W + px] = (bits & (1 << row)) ? fg : bg;
-        }
-    }
-    // 1-pixel spacing column
-    for (int row = 0; row < 7; row++) {
-        int px = x + 5;
-        int py = y + row;
-        if (px >= 0 && px < LCD_W && py >= 0 && py < LCD_H)
-            s_fb[py * LCD_W + px] = bg;
-    }
-}
-
 static void fbFlush() {
     if (s_panel && s_fb)
         esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fb);

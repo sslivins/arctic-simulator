@@ -12,7 +12,19 @@ static const char* TAG = "sim";
 
 namespace simulation {
 
+static bool s_enabled = true;
+
+void setEnabled(bool enabled) {
+    if (s_enabled != enabled) {
+        ESP_LOGI(TAG, "Simulation %s", enabled ? "enabled" : "disabled");
+    }
+    s_enabled = enabled;
+}
+
+bool isEnabled() { return s_enabled; }
+
 void updateStatus() {
+    if (!s_enabled) return;
     uint16_t unit_on = reg::get(reg::UNIT_ON_OFF);
     uint16_t mode    = reg::get(reg::WORKING_MODE);
 

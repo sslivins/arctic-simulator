@@ -14,6 +14,7 @@
  *   POST /api/playback/start        — Start playback
  *   POST /api/playback/stop         — Stop playback
  *   GET  /api/playback/status       — Playback status
+ *   POST /api/simulation             — Enable/disable simulation { "enabled": bool }
  *   GET  /api/stream                — SSE stream (real-time register snapshots)
  *   POST /api/stream/stop           — Stop active SSE stream
  */
@@ -138,13 +139,17 @@ static esp_err_t sendError(httpd_req_t* req, int status, const char* msg) {
 }
 
 // Read request body into buffer (caller frees)
-static char* readBody(httpd_req_t* req) {
+static char* readBody(httpd_req_t* req, int max_len = 8192) {
     int len = req->content_len;
-    if (len <= 0 || len > 8192) return nullptr;
+    if (len <= 0 || len > max_len) return nullptr;
     char* buf = (char*)malloc(len + 1);
     if (!buf) return nullptr;
-    int received = httpd_req_recv(req, buf, len);
-    if (received != len) { free(buf); return nullptr; }
+    int total = 0;
+    while (total < len) {
+        int received = httpd_req_recv(req, buf + total, len - total);
+        if (received <= 0) { free(buf); return nullptr; }
+        total += received;
+    }
     buf[len] = '\0';
     return buf;
 }
@@ -255,6 +260,8 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
         pb_status.state == playback::State::PAUSED  ? "paused" : "unknown");
     cJSON_AddNumberToObject(pb, "entries", pb_status.total_entries);
     cJSON_AddNumberToObject(pb, "position", pb_status.current_entry);
+
+    cJSON_AddBoolToObject(json, "simulation", simulation::isEnabled());
 
     // SSE stream
     cJSON* st = cJSON_AddObjectToObject(json, "stream");
@@ -387,6 +394,35 @@ static esp_err_t handleBulkSet(httpd_req_t* req) {
 }
 
 // ============================================================================
+// POST /api/simulation  — body: { "enabled": true/false }
+// ============================================================================
+
+static esp_err_t handleSimulation(httpd_req_t* req) {
+    char* body = readBody(req);
+    if (!body) return sendError(req, 400, "Invalid body");
+
+    cJSON* json = cJSON_Parse(body);
+    free(body);
+    if (!json) return sendError(req, 400, "Invalid JSON");
+
+    cJSON* enabled = cJSON_GetObjectItem(json, "enabled");
+    if (!enabled || !cJSON_IsBool(enabled)) {
+        cJSON_Delete(json);
+        return sendError(req, 400, "Missing 'enabled' boolean");
+    }
+
+    simulation::setEnabled(cJSON_IsTrue(enabled));
+    cJSON_Delete(json);
+
+    // If re-enabling, recompute status from current holding registers
+    if (simulation::isEnabled()) simulation::updateStatus();
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "simulation", simulation::isEnabled());
+    return sendJson(req, resp);
+}
+
+// ============================================================================
 // POST /api/preset  — body: { "name": "heating" }
 // ============================================================================
 
@@ -443,8 +479,8 @@ static esp_err_t handleClearErrors(httpd_req_t* req) {
 // ============================================================================
 
 static esp_err_t handlePlaybackLoad(httpd_req_t* req) {
-    char* body = readBody(req);
-    if (!body) return sendError(req, 400, "Request too large or empty");
+    char* body = readBody(req, 65536);  // captures can be large
+    if (!body) return sendError(req, 400, "Request too large (>64KB) or empty");
 
     esp_err_t err = playback::loadFromString(body);
     free(body);
@@ -666,6 +702,7 @@ esp_err_t start() {
         { "/api/registers/bulk",  HTTP_POST, handleBulkSet,       nullptr },
         { "/api/preset",          HTTP_POST, handlePreset,        nullptr },
         { "/api/errors/clear",    HTTP_POST, handleClearErrors,   nullptr },
+        { "/api/simulation",     HTTP_POST, handleSimulation,    nullptr },
         { "/api/playback/load",   HTTP_POST, handlePlaybackLoad,  nullptr },
         { "/api/playback/start",  HTTP_POST, handlePlaybackStart, nullptr },
         { "/api/playback/stop",   HTTP_POST, handlePlaybackStop,  nullptr },
