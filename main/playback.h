@@ -3,10 +3,14 @@
  * Loads JSONL capture files and replays register values
  * timed to match the original capture.
  *
+ * Timestamps ("t") can be either epoch-milliseconds or relative-to-start;
+ * the engine subtracts the first entry's timestamp automatically so both
+ * formats produce correct relative timing.
+ *
  * Capture format (JSONL — one JSON object per line):
- *   {"t":0,"fc":3,"addr":2100,"count":39,"values":[...]}
- *   {"t":500,"fc":3,"addr":2000,"count":58,"values":[...]}
- *   {"t":1000,"fc":6,"addr":2000,"value":1}
+ *   {"t":1773535127116,"fc":3,"addr":2100,"count":39,"values":[...]}
+ *   {"t":1773535127618,"fc":3,"addr":2000,"count":58,"values":[...]}
+ *   {"t":1773535128116,"fc":6,"addr":2000,"value":1}
  */
 #pragma once
 

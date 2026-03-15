@@ -23,7 +23,7 @@ namespace playback {
 // ============================================================================
 
 struct Entry {
-    uint32_t timestamp_ms;  // Milliseconds since capture start
+    int64_t  timestamp_ms;  // Milliseconds (epoch or relative — base is subtracted at playback)
     uint16_t addr;          // Starting register address
     uint16_t count;         // Number of registers
     uint16_t* values;       // Heap-allocated array of values
@@ -36,7 +36,8 @@ struct Entry {
 static State s_state = State::IDLE;
 static std::vector<Entry> s_entries;
 static uint32_t s_current = 0;
-static int64_t  s_start_time = 0;  // microseconds (esp_timer_get_time)
+static int64_t  s_start_time = 0;   // microseconds (esp_timer_get_time)
+static int64_t  s_base_ts    = 0;   // first entry's timestamp (subtracted to get relative)
 
 // ============================================================================
 // Helpers
@@ -119,7 +120,7 @@ esp_err_t loadFromString(const char* jsonl_data) {
         Entry entry = {};
 
         cJSON* t = cJSON_GetObjectItem(json, "t");
-        if (t && cJSON_IsNumber(t)) entry.timestamp_ms = (uint32_t)t->valueint;
+        if (t && cJSON_IsNumber(t)) entry.timestamp_ms = (int64_t)t->valuedouble;
 
         cJSON* addr_item = cJSON_GetObjectItem(json, "addr");
         if (addr_item && cJSON_IsNumber(addr_item)) entry.addr = (uint16_t)addr_item->valueint;
@@ -180,9 +181,11 @@ esp_err_t start() {
         return ESP_ERR_INVALID_STATE;
     }
     s_current = 0;
+    s_base_ts = s_entries.empty() ? 0 : s_entries[0].timestamp_ms;
     s_start_time = esp_timer_get_time();
     s_state = State::PLAYING;
-    ESP_LOGI(TAG, "Playback started (%lu entries)", (unsigned long)s_entries.size());
+    ESP_LOGI(TAG, "Playback started (%lu entries, base_ts=%lld)",
+             (unsigned long)s_entries.size(), (long long)s_base_ts);
     return ESP_OK;
 }
 
@@ -190,6 +193,7 @@ void stop() {
     s_state = s_entries.empty() ? State::IDLE : State::LOADED;
     s_current = 0;
     s_start_time = 0;
+    s_base_ts = 0;
     ESP_LOGI(TAG, "Playback stopped");
 }
 
@@ -219,14 +223,18 @@ void tick() {
 
     uint32_t now = elapsedMs();
 
-    // Apply all entries whose timestamp has been reached
-    while (s_current < s_entries.size() && s_entries[s_current].timestamp_ms <= now) {
+    // Apply all entries whose relative timestamp has been reached
+    while (s_current < s_entries.size()) {
+        int64_t rel = s_entries[s_current].timestamp_ms - s_base_ts;
+        if (rel < 0) rel = 0;
+        if ((uint32_t)rel > now) break;
+
         const Entry& e = s_entries[s_current];
         for (uint16_t i = 0; i < e.count; i++) {
             reg::set(e.addr + i, e.values[i]);
         }
-        ESP_LOGD(TAG, "Applied entry %lu: addr=%u count=%u t=%lu",
-                 (unsigned long)s_current, e.addr, e.count, (unsigned long)e.timestamp_ms);
+        ESP_LOGD(TAG, "Applied entry %lu: addr=%u count=%u rel=%ld",
+                 (unsigned long)s_current, e.addr, e.count, (long)rel);
         s_current++;
     }
 }
