@@ -231,6 +231,24 @@ paths:
                     type: string
                     example: cleared
 
+  /api/reboot:
+    post:
+      tags: [System]
+      summary: Reboot the device
+      description: Sends HTTP response then reboots the ESP32 after a short delay.
+      operationId: reboot
+      responses:
+        "200":
+          description: Reboot initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: rebooting
+
   /api/playback/load:
     post:
       tags: [Playback]

@@ -84,6 +84,7 @@ Available presets: `idle`, `heating`, `cooling`, `hot_water`, `defrost`, `error_
 
 ```
 POST /api/errors/clear           # Clear all error flags
+POST /api/reboot                 # Reboot the device
 ```
 
 ### Playback

@@ -92,6 +92,7 @@ stand-in for the real heat pump during development and integration testing of th
   - `POST /api/registers/bulk` — set multiple `{ "registers": { "2100": 350 } }`
   - `POST /api/preset` — load preset `{ "name": "heating" }`
   - `POST /api/errors/clear` — clear error flags
+  - `POST /api/reboot` — reboot the device
   - `POST /api/playback/load` — upload JSONL capture (body)
   - `POST /api/playback/start` — start playback
   - `POST /api/playback/stop` — stop playback

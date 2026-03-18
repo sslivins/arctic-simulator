@@ -17,6 +17,7 @@
  *   POST /api/simulation             — Enable/disable simulation { "enabled": bool }
  *   GET  /api/stream                — SSE stream (real-time register snapshots)
  *   POST /api/stream/stop           — Stop active SSE stream
+ *   POST /api/reboot                — Reboot the device
  */
 #include "api_server.h"
 #include "register_map.h"
@@ -660,6 +661,26 @@ static esp_err_t handleStreamStop(httpd_req_t* req) {
 }
 
 // ============================================================================
+// Reboot
+// ============================================================================
+
+static void reboot_task(void*) {
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+}
+
+static esp_err_t handleReboot(httpd_req_t* req) {
+    ESP_LOGW(TAG, "Reboot requested via API");
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "rebooting");
+    sendJson(req, resp);
+
+    // Delay reboot so the HTTP response can flush
+    xTaskCreate(reboot_task, "reboot", 2048, nullptr, 5, nullptr);
+    return ESP_OK;
+}
+
+// ============================================================================
 // CORS preflight
 // ============================================================================
 
@@ -709,6 +730,7 @@ esp_err_t start() {
         { "/api/playback/status", HTTP_GET,  handlePlaybackStatus,nullptr },
         { "/api/stream",           HTTP_GET,  handleStream,          nullptr },
         { "/api/stream/stop",      HTTP_POST, handleStreamStop,      nullptr },
+        { "/api/reboot",           HTTP_POST, handleReboot,          nullptr },
         { "/api/*",               HTTP_OPTIONS, handleOptions,    nullptr },
     };
 
