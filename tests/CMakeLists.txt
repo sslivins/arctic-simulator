@@ -33,3 +33,16 @@ target_include_directories(test_tuya_state PRIVATE
 )
 
 add_test(NAME tuya_state COMMAND test_tuya_state)
+
+# ----- tuya_slave -----------------------------------------------------------
+add_executable(test_tuya_slave
+    test_tuya_slave.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_slave.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_codec/tuya_codec.cpp
+)
+target_include_directories(test_tuya_slave PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
+add_test(NAME tuya_slave COMMAND test_tuya_slave)
