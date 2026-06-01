@@ -25,6 +25,7 @@
 #else
   using esp_err_t = int;
 #endif
+#include <cstddef>
 #include <cstdint>
 
 namespace tuya_slave {
