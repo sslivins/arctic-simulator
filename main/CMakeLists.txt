@@ -47,6 +47,7 @@ idf_component_register(
         "modbus_slave.cpp"
         "api_server.cpp"
         "playback.cpp"
+        "playback_raw.cpp"
         "wifi_manager.cpp"
         "dns_server.cpp"
         "simulation.cpp"

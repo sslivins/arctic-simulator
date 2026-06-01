@@ -6,7 +6,9 @@
  * During playback, a timer ticks and applies entries as their timestamps pass.
  */
 #include "playback.h"
+#include "playback_raw.h"
 #include "register_map.h"
+#include "tuya_state.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "cJSON.h"
@@ -24,9 +26,11 @@ namespace playback {
 
 struct Entry {
     int64_t  timestamp_ms;  // Milliseconds (epoch or relative — base is subtracted at playback)
-    uint16_t addr;          // Starting register address
-    uint16_t count;         // Number of registers
-    uint16_t* values;       // Heap-allocated array of values
+    bool     is_raw;        // True for sniffer raw lines (apply via tuya_state::writeWindow)
+    uint16_t addr;          // Legacy: starting register address; raw: field_a
+    uint16_t count;         // Legacy: number of registers; raw: field_b (payload byte count)
+    uint16_t* values;       // Legacy register values (null for raw entries)
+    uint8_t*  bytes;        // Raw payload bytes (null for legacy entries)
 };
 
 // ============================================================================
@@ -45,7 +49,8 @@ static int64_t  s_base_ts    = 0;   // first entry's timestamp (subtracted to ge
 
 static void freeEntries() {
     for (auto& e : s_entries) {
-        free(e.values);
+        if (e.values) free(e.values);
+        if (e.bytes)  free(e.bytes);
     }
     s_entries.clear();
     s_current = 0;
@@ -121,6 +126,31 @@ esp_err_t loadFromString(const char* jsonl_data) {
 
         cJSON* t = cJSON_GetObjectItem(json, "t");
         if (t && cJSON_IsNumber(t)) entry.timestamp_ms = (int64_t)t->valuedouble;
+
+        // Raw sniffer line: {"t":<ms>,"raw":"<hex>"}
+        cJSON* raw_item = cJSON_GetObjectItem(json, "raw");
+        if (raw_item && cJSON_IsString(raw_item) && raw_item->valuestring) {
+            const char* hex = raw_item->valuestring;
+            playback_raw::RawResponse rr;
+            auto rc = playback_raw::decode_response(hex, strlen(hex), rr);
+            if (rc == playback_raw::DecodeResult::OK) {
+                entry.is_raw = true;
+                entry.addr   = rr.field_a;
+                entry.count  = rr.field_b;
+                entry.bytes  = (uint8_t*)malloc(rr.payload_len);
+                if (entry.bytes) {
+                    memcpy(entry.bytes, rr.payload, rr.payload_len);
+                    s_entries.push_back(entry);
+                    parsed++;
+                }
+            } else {
+                ESP_LOGW(TAG, "Skipping un-decodable raw line %d (rc=%d)",
+                         line_num, (int)rc);
+            }
+            cJSON_Delete(json);
+            line_start = line_end ? line_end + 1 : line_start + line_len;
+            continue;
+        }
 
         cJSON* addr_item = cJSON_GetObjectItem(json, "addr");
         if (addr_item && cJSON_IsNumber(addr_item)) entry.addr = (uint16_t)addr_item->valueint;
@@ -230,11 +260,16 @@ void tick() {
         if ((uint32_t)rel > now) break;
 
         const Entry& e = s_entries[s_current];
-        for (uint16_t i = 0; i < e.count; i++) {
-            reg::set(e.addr + i, e.values[i]);
+        if (e.is_raw) {
+            tuya_state::writeWindow(e.addr, e.count, e.bytes, e.count);
+        } else {
+            for (uint16_t i = 0; i < e.count; i++) {
+                reg::set(e.addr + i, e.values[i]);
+            }
         }
-        ESP_LOGD(TAG, "Applied entry %lu: addr=%u count=%u rel=%ld",
-                 (unsigned long)s_current, e.addr, e.count, (long)rel);
+        ESP_LOGD(TAG, "Applied entry %lu: addr=%u count=%u rel=%ld%s",
+                 (unsigned long)s_current, e.addr, e.count, (long)rel,
+                 e.is_raw ? " [raw]" : "");
         s_current++;
     }
 }

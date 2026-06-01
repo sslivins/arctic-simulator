@@ -62,3 +62,15 @@ target_compile_definitions(test_tuya_slave_golden PRIVATE
 )
 
 add_test(NAME tuya_slave_golden COMMAND test_tuya_slave_golden)
+
+# ----- playback_raw: sniffer raw-jsonl decoder ----------------------------
+add_executable(test_playback_raw
+    test_playback_raw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/playback_raw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_codec/tuya_codec.cpp
+)
+target_include_directories(test_playback_raw PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
+add_test(NAME playback_raw COMMAND test_playback_raw)
