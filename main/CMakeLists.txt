@@ -52,8 +52,10 @@ idf_component_register(
         "simulation.cpp"
         "display.cpp"
         "status_led.cpp"
+        "tuya_codec/tuya_codec.cpp"
     INCLUDE_DIRS
         "."
+        "tuya_codec"
     EMBED_FILES
         "web/index.html.gz"
         "web/portal.html.gz"
