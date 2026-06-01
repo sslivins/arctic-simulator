@@ -53,6 +53,7 @@ idf_component_register(
         "display.cpp"
         "status_led.cpp"
         "tuya_codec/tuya_codec.cpp"
+        "tuya_state.cpp"
     INCLUDE_DIRS
         "."
         "tuya_codec"
