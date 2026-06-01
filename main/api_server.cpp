@@ -197,13 +197,13 @@ static esp_err_t handleGetHeatpump(httpd_req_t* req) {
     cJSON* elec = cJSON_AddObjectToObject(json, "electrical");
     cJSON_AddNumberToObject(elec, "ac_voltage", reg::get(reg::AC_VOLTAGE));
     cJSON_AddNumberToObject(elec, "ac_current", reg::get(reg::AC_CURRENT));
-    // DC voltage stored as raw × 10 — convert to actual volts
-    cJSON_AddNumberToObject(elec, "dc_voltage", reg::get(reg::DC_VOLTAGE) / 10.0);
+    // Raw byte values; voltage/pressure scale factors are unconfirmed.
+    // See arctic-sniffer docs/TUYA-ARCTIC-PROTOCOL.md §6/§8.
+    cJSON_AddNumberToObject(elec, "dc_voltage_raw", reg::get(reg::DC_VOLTAGE));
 
-    // --- Pressure (stored as raw × 100 — convert to MPa) ---
     cJSON* pressure = cJSON_AddObjectToObject(json, "pressure");
-    cJSON_AddNumberToObject(pressure, "high", reg::get(reg::HIGH_PRESSURE) / 100.0);
-    cJSON_AddNumberToObject(pressure, "low", reg::get(reg::LOW_PRESSURE) / 100.0);
+    cJSON_AddNumberToObject(pressure, "high_raw", reg::get(reg::HIGH_PRESSURE));
+    cJSON_AddNumberToObject(pressure, "low_raw", reg::get(reg::LOW_PRESSURE));
 
     // --- Peripherals ---
     cJSON* periph = cJSON_AddObjectToObject(json, "peripherals");
