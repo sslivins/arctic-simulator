@@ -75,9 +75,12 @@ static void setCommonDefaults() {
     s_holding[HOT_WATER_DELTA_T - HOLDING_BASE]   = 5;
     s_holding[FAN_COIL_HEATING_DT - HOLDING_BASE] = 5;
 
-    // Common sensor readings
-    s_input[AC_VOLTAGE - INPUT_BASE]   = 230;   // 230V
-    s_input[DC_VOLTAGE - INPUT_BASE]   = 3200;  // protocol says ÷10 → 320V
+    // Common sensor readings — raw byte values per protocol (no preset
+    // scaling). Voltage scale factors are unconfirmed; idle capture shows
+    // AC_VOLTAGE=12, DC_VOLTAGE=1. Update once a compressor-running capture
+    // confirms running-state values and their scale.
+    s_input[AC_VOLTAGE - INPUT_BASE]   = 12;
+    s_input[DC_VOLTAGE - INPUT_BASE]   = 1;
     s_input[EE_CODING - INPUT_BASE]    = 1;
 }
 
@@ -109,11 +112,11 @@ void loadPreset(Preset preset) {
         s_input[SUCTION_TEMP - INPUT_BASE]         = 3;
         s_input[OUTDOOR_COIL_TEMP - INPUT_BASE]    = 2;
         s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 55;
-        s_input[FAN_SPEED - INPUT_BASE]            = 600;
+        s_input[FAN_SPEED - INPUT_BASE]            = 200;
         s_input[AC_CURRENT - INPUT_BASE]           = 8;
         s_input[PRIMARY_EEV - INPUT_BASE]          = 200;
-        s_input[HIGH_PRESSURE - INPUT_BASE]        = 250;  // ÷100 → 2.50 MPa
-        s_input[LOW_PRESSURE - INPUT_BASE]         = 80;   // ÷100 → 0.80 MPa
+        s_input[HIGH_PRESSURE - INPUT_BASE]        = 250;
+        s_input[LOW_PRESSURE - INPUT_BASE]         = 80;
         s_input[IPM_TEMP - INPUT_BASE]             = 45;
 
         // Status: unit on, compressor on, fan low, water pump on, water flow OK
@@ -135,11 +138,11 @@ void loadPreset(Preset preset) {
         s_input[SUCTION_TEMP - INPUT_BASE]         = 5;
         s_input[OUTDOOR_COIL_TEMP - INPUT_BASE]    = 50;
         s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 60;
-        s_input[FAN_SPEED - INPUT_BASE]            = 700;
+        s_input[FAN_SPEED - INPUT_BASE]            = 230;
         s_input[AC_CURRENT - INPUT_BASE]           = 10;
         s_input[PRIMARY_EEV - INPUT_BASE]          = 250;
-        s_input[HIGH_PRESSURE - INPUT_BASE]        = 300;  // ÷100 → 3.00 MPa
-        s_input[LOW_PRESSURE - INPUT_BASE]         = 60;   // ÷100 → 0.60 MPa
+        s_input[HIGH_PRESSURE - INPUT_BASE]        = 250;
+        s_input[LOW_PRESSURE - INPUT_BASE]         = 60;
         s_input[IPM_TEMP - INPUT_BASE]             = 50;
 
         s_input[STATUS_2 - INPUT_BASE] = STS2_UNIT_ON | STS2_COMPRESSOR |
@@ -160,10 +163,10 @@ void loadPreset(Preset preset) {
         s_input[DISCHARGE_TEMP - INPUT_BASE]       = 85;
         s_input[SUCTION_TEMP - INPUT_BASE]         = 8;
         s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 70;
-        s_input[FAN_SPEED - INPUT_BASE]            = 500;
+        s_input[FAN_SPEED - INPUT_BASE]            = 180;
         s_input[AC_CURRENT - INPUT_BASE]           = 12;
-        s_input[HIGH_PRESSURE - INPUT_BASE]        = 350;  // ÷100 → 3.50 MPa
-        s_input[LOW_PRESSURE - INPUT_BASE]         = 90;   // ÷100 → 0.90 MPa
+        s_input[HIGH_PRESSURE - INPUT_BASE]        = 250;
+        s_input[LOW_PRESSURE - INPUT_BASE]         = 90;
 
         s_input[STATUS_2 - INPUT_BASE] = STS2_UNIT_ON | STS2_COMPRESSOR |
                                          STS2_FAN_LOW | STS2_WATER_PUMP |
@@ -175,12 +178,13 @@ void loadPreset(Preset preset) {
         s_holding[UNIT_ON_OFF - HOLDING_BASE]    = 1;
         s_holding[WORKING_MODE - HOLDING_BASE]   = MODE_FLOOR_HEATING;
 
-        // Negative temps: encoding TBD (need real captures to confirm)
-        // Using two's complement uint16 for now: -2 → 65534, -5 → 65531
-        s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = (uint16_t)(-2);  // -2°C
+        // Negative temps use signed-byte encoding (-2 → 254, -5 → 251).
+        // The cast chain int8_t→uint8_t→uint16_t preserves the low byte
+        // that tuya_state actually serves, so the wire sees 254 / 251.
+        s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = (uint8_t)(int8_t)(-2);
         s_input[INLET_WATER_TEMP - INPUT_BASE]     = 30;
         s_input[OUTLET_WATER_TEMP - INPUT_BASE]    = 28;
-        s_input[OUTDOOR_COIL_TEMP - INPUT_BASE]    = (uint16_t)(-5);  // -5°C
+        s_input[OUTDOOR_COIL_TEMP - INPUT_BASE]    = (uint8_t)(int8_t)(-5);
         s_input[DISCHARGE_TEMP - INPUT_BASE]       = 50;
         s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 40;
         s_input[FAN_SPEED - INPUT_BASE]            = 0;     // Fan off during defrost
