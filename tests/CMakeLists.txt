@@ -46,3 +46,19 @@ target_include_directories(test_tuya_slave PRIVATE
 )
 
 add_test(NAME tuya_slave COMMAND test_tuya_slave)
+
+# ----- tuya_slave golden tests against real captures -----------------------
+add_executable(test_tuya_slave_golden
+    test_tuya_slave_golden.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_slave.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_codec/tuya_codec.cpp
+)
+target_include_directories(test_tuya_slave_golden PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+target_compile_definitions(test_tuya_slave_golden PRIVATE
+    CAPTURE_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
+)
+
+add_test(NAME tuya_slave_golden COMMAND test_tuya_slave_golden)
