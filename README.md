@@ -143,10 +143,12 @@ arctic-simulator/
 ├── main/
 │   ├── CMakeLists.txt          # Component registration
 │   ├── Kconfig.projbuild       # Menuconfig options
-│   ├── idf_component.yml       # esp-modbus, mdns dependencies
+│   ├── idf_component.yml       # mdns, led_strip dependencies
 │   ├── main.cpp                # Entry point, task creation
 │   ├── register_map.h/cpp      # Register storage, presets
-│   ├── modbus_slave.h/cpp      # Modbus RTU slave (esp_modbus)
+│   ├── tuya_codec/             # Tuya MCU framing (vendored from sniffer)
+│   ├── tuya_state.h/cpp        # Byte-store + mutex-guarded snapshots
+│   ├── tuya_slave.h/cpp        # Tuya MCU slave over RS-485
 │   ├── api_server.h/cpp        # REST API (esp_http_server)
 │   ├── playback.h/cpp          # JSONL capture replay engine
 │   └── wifi_manager.h/cpp      # WiFi STA + mDNS

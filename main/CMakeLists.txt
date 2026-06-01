@@ -44,7 +44,6 @@ idf_component_register(
     SRCS
         "main.cpp"
         "register_map.cpp"
-        "modbus_slave.cpp"
         "api_server.cpp"
         "playback.cpp"
         "playback_raw.cpp"

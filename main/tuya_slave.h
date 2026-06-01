@@ -5,10 +5,7 @@
 //
 // Drives the RS-485 UART. Decodes inbound request frames using tuya_codec,
 // fetches the matching window snapshot from tuya_state, encodes a response
-// frame, and writes it back. Coexists with modbus_slave during the Tuya
-// rollout — the active slave is selected at run-time (eventually via a
-// Kconfig switch added in p2b.4). Only ONE slave may own the UART at a
-// time.
+// frame, and writes it back. Owns the RS-485 UART exclusively.
 //
 // Threading:
 //   - One FreeRTOS task pinned to core 1 with its own stack and a UART
