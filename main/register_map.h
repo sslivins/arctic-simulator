@@ -1,7 +1,16 @@
 /*
  * Arctic Heat Pump Register Map
- * Mirrors the ECO-600 register layout for simulation.
- * Based on EVI DC Inverter Heat Pump Communication Protocol V1.3
+ *
+ * Address layout for the Arctic EVI heat pump as observed on the wire.
+ * Wire format is 1 byte/reg (see arctic-sniffer docs/TUYA-ARCTIC-PROTOCOL.md).
+ * Storage here is uint16_t for historical convenience; values are masked to
+ * a byte by tuya_state when handed to the slave, so anything > 255 in a
+ * preset will silently truncate to its low byte.
+ *
+ * Negative temperatures use signed-byte encoding (e.g. -6°C → 250).
+ * Per-register scale factors for pressure / DC voltage / fan RPM are
+ * UNCONFIRMED — protocol doc §6/§8. Presets here emit raw byte values
+ * and do NOT pre-multiply by any assumed scale factor.
  */
 #pragma once
 
@@ -55,7 +64,8 @@ constexpr uint16_t FREQ_CTRL_SETTING     = 2057;
 // Input Register Addresses (R/O) — 2100–2138
 // ============================================================================
 
-// Temperatures (whole °C, UINT16 — negative encoding TBD, see protocol doc)
+// Temperatures (whole °C, no scaling; negatives use signed-byte encoding,
+// e.g. -6°C → raw byte 250. See protocol doc §6.)
 constexpr uint16_t WATER_TANK_TEMP       = 2100;
 constexpr uint16_t OUTLET_WATER_TEMP     = 2102;
 constexpr uint16_t INLET_WATER_TEMP      = 2103;
@@ -78,12 +88,12 @@ constexpr uint16_t COMPRESSOR_FREQ       = 2118;
 constexpr uint16_t FAN_SPEED             = 2119;
 constexpr uint16_t AC_VOLTAGE            = 2120;
 constexpr uint16_t AC_CURRENT            = 2121;
-constexpr uint16_t DC_VOLTAGE            = 2122;  // ÷10 for actual V
+constexpr uint16_t DC_VOLTAGE            = 2122;  // raw byte; scale TBD
 constexpr uint16_t COMP_PHASE_CURRENT    = 2123;
 constexpr uint16_t PRIMARY_EEV           = 2124;
 constexpr uint16_t SECONDARY_EEV         = 2125;
-constexpr uint16_t HIGH_PRESSURE         = 2126;  // ÷100 for MPa
-constexpr uint16_t LOW_PRESSURE          = 2127;  // ÷100 for MPa
+constexpr uint16_t HIGH_PRESSURE         = 2126;  // raw byte; scale TBD
+constexpr uint16_t LOW_PRESSURE          = 2127;  // raw byte; scale TBD
 constexpr uint16_t EE_CODING             = 2128;
 
 // Status / error registers (bit fields)

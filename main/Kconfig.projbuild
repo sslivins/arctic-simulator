@@ -54,14 +54,7 @@ menu "Arctic Simulator Configuration"
         default 1
         range 0 2
         help
-            UART port number for Modbus communication.
-
-    config SIMULATOR_MODBUS_SLAVE_ADDR
-        int "Modbus Slave Address"
-        default 1
-        range 1 247
-        help
-            Modbus slave address. The Arctic heat pump uses address 1.
+            UART port number for the Tuya MCU wire protocol.
 
 endmenu
 

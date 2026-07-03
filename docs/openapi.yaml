@@ -588,27 +588,34 @@ components:
           properties:
             ac_voltage:
               type: integer
-              description: AC voltage in V
-              example: 230
+              description: |
+                Raw AC voltage register byte. Scale factor is unconfirmed —
+                idle capture shows 12 (possible ×20 → 240V, possible
+                offset/sentinel). See arctic-sniffer protocol doc §6/§8.
+              example: 12
             ac_current:
               type: integer
               description: AC current in A
               example: 5
-            dc_voltage:
-              type: number
-              description: DC bus voltage in V (raw register ÷10)
-              example: 37.5
+            dc_voltage_raw:
+              type: integer
+              description: |
+                Raw DC bus voltage register byte. Scale factor is unconfirmed
+                (see arctic-sniffer docs/TUYA-ARCTIC-PROTOCOL.md §6/§8).
+              example: 1
         pressure:
           type: object
           properties:
-            high:
-              type: number
-              description: High-side pressure in MPa (raw register ÷100)
-              example: 2.8
-            low:
-              type: number
-              description: Low-side pressure in MPa (raw register ÷100)
-              example: 0.45
+            high_raw:
+              type: integer
+              description: |
+                Raw high-side pressure register byte. Scale factor unconfirmed.
+              example: 0
+            low_raw:
+              type: integer
+              description: |
+                Raw low-side pressure register byte. Scale factor unconfirmed.
+              example: 0
         peripherals:
           type: object
           properties:

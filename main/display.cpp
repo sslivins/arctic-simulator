@@ -13,7 +13,6 @@
  */
 #include "display.h"
 #include "register_map.h"
-#include "modbus_slave.h"
 #include "playback.h"
 #include "wifi_manager.h"
 

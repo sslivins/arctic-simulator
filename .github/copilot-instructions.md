@@ -52,22 +52,25 @@ stand-in for the real heat pump during development and integration testing of th
 |------|---------|
 | `main/` | All application source code |
 | `main/register_map.h/cpp` | Register storage (holding 2000–2057, input 2100–2138), presets |
-| `main/modbus_slave.h/cpp` | Modbus RTU slave via esp_modbus, RS-485 communication |
+| `main/tuya_codec/` | Tuya MCU frame codec (parse, encode, checksum) |
+| `main/tuya_state.h/cpp` | Per-window byte store with mutex-guarded snapshots |
+| `main/tuya_slave.h/cpp` | Tuya MCU wire-protocol slave over RS-485 |
 | `main/api_server.h/cpp` | REST API endpoints (register control, presets, playback) |
 | `main/playback.h/cpp` | JSONL capture file parser and replay engine |
 | `main/wifi_manager.h/cpp` | WiFi STA mode + mDNS (arctic-sim.local) |
 | `main/main.cpp` | Entry point, FreeRTOS task creation |
-| `main/Kconfig.projbuild` | Menuconfig options (WiFi, GPIO pins, Modbus address) |
+| `main/Kconfig.projbuild` | Menuconfig options (WiFi, GPIO pins, UART port) |
 | `captures/` | Example JSONL capture files |
 | `.github/workflows/` | CI: `build.yml` |
 
 ## Related Projects
 
+- **[arctic-sniffer](https://github.com/sslivins/arctic-sniffer)** — Passive RS-485
+  sniffer. Source of the vendored `tuya_codec`. See
+  `arctic-sniffer/docs/TUYA-ARCTIC-PROTOCOL.md` for the wire format.
 - **[arctic-controller](https://github.com/sslivins/arctic-controller)** — The heat
-  pump controller this simulator is designed to test against. The controller is the
-  Modbus master; this simulator is the slave.
-- The Modbus register map is defined in the controller repo at
-  `docs/ARCTIC-MODBUS-PROTOCOL.md`. Any register map changes must be kept in sync.
+  pump controller this simulator is designed to test against. The controller acts as
+  the Tuya MCU master; this simulator is the slave.
 
 ## Code Conventions
 
@@ -76,7 +79,7 @@ stand-in for the real heat pump during development and integration testing of th
 - **Printf format specifiers**: The Xtensa/RISC-V toolchain does not reliably handle
   `%lld` for `int64_t`. Always cast to `(long)` and use `%ld`, or `(unsigned long)`
   and use `%lu`.
-- Namespaces: `reg::`, `mb_slave::`, `api::`, `playback::`, `wifi::`
+- Namespaces: `reg::`, `tuya_slave::`, `api::`, `playback::`, `wifi::`
 - Register addresses use the protocol's native numbering (2000–2138), not zero-based
   offsets. Conversion to array indices is internal to `register_map.cpp`.
 

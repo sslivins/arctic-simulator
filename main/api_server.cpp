@@ -2,7 +2,7 @@
  * REST API Server — Implementation
  *
  * Endpoints:
- *   GET  /api/status                — Simulator status + Modbus stats
+ *   GET  /api/status                -- Simulator status + Tuya stats
  *   GET  /api/heatpump              — Abstracted heat pump state
  *   GET  /api/registers             — All register values (raw)
  *   GET  /api/registers?addr=XXXX   — Single register
@@ -21,7 +21,7 @@
  */
 #include "api_server.h"
 #include "register_map.h"
-#include "modbus_slave.h"
+#include "tuya_slave.h"
 #include "simulation.h"
 #include "playback.h"
 #include "wifi_manager.h"
@@ -197,13 +197,13 @@ static esp_err_t handleGetHeatpump(httpd_req_t* req) {
     cJSON* elec = cJSON_AddObjectToObject(json, "electrical");
     cJSON_AddNumberToObject(elec, "ac_voltage", reg::get(reg::AC_VOLTAGE));
     cJSON_AddNumberToObject(elec, "ac_current", reg::get(reg::AC_CURRENT));
-    // DC voltage stored as raw × 10 — convert to actual volts
-    cJSON_AddNumberToObject(elec, "dc_voltage", reg::get(reg::DC_VOLTAGE) / 10.0);
+    // Raw byte values; voltage/pressure scale factors are unconfirmed.
+    // See arctic-sniffer docs/TUYA-ARCTIC-PROTOCOL.md §6/§8.
+    cJSON_AddNumberToObject(elec, "dc_voltage_raw", reg::get(reg::DC_VOLTAGE));
 
-    // --- Pressure (stored as raw × 100 — convert to MPa) ---
     cJSON* pressure = cJSON_AddObjectToObject(json, "pressure");
-    cJSON_AddNumberToObject(pressure, "high", reg::get(reg::HIGH_PRESSURE) / 100.0);
-    cJSON_AddNumberToObject(pressure, "low", reg::get(reg::LOW_PRESSURE) / 100.0);
+    cJSON_AddNumberToObject(pressure, "high_raw", reg::get(reg::HIGH_PRESSURE));
+    cJSON_AddNumberToObject(pressure, "low_raw", reg::get(reg::LOW_PRESSURE));
 
     // --- Peripherals ---
     cJSON* periph = cJSON_AddObjectToObject(json, "peripherals");
@@ -238,7 +238,7 @@ static esp_err_t handleGetHeatpump(httpd_req_t* req) {
 // ============================================================================
 
 static esp_err_t handleGetStatus(httpd_req_t* req) {
-    auto stats = mb_slave::getStats();
+    auto stats = tuya_slave::getStats();
     auto pb_status = playback::getStatus();
 
     cJSON* json = cJSON_CreateObject();
@@ -246,12 +246,17 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
     const esp_app_desc_t* app = esp_app_get_description();
     cJSON_AddStringToObject(json, "version", app->version);
     cJSON_AddStringToObject(json, "hostname", wifi::getHostname());
-    cJSON_AddBoolToObject(json, "modbus_active", mb_slave::isInitialized());
+    cJSON_AddBoolToObject(json, "tuya_active", tuya_slave::isInitialized());
 
-    cJSON* mb = cJSON_AddObjectToObject(json, "modbus_stats");
-    cJSON_AddNumberToObject(mb, "reads", stats.read_count);
-    cJSON_AddNumberToObject(mb, "writes", stats.write_count);
-    cJSON_AddNumberToObject(mb, "errors", stats.error_count);
+    cJSON* tu = cJSON_AddObjectToObject(json, "tuya_stats");
+    cJSON_AddNumberToObject(tu, "frames_seen", stats.frames_seen);
+    cJSON_AddNumberToObject(tu, "requests_handled", stats.requests_handled);
+    cJSON_AddNumberToObject(tu, "responses_sent", stats.responses_sent);
+    cJSON_AddNumberToObject(tu, "parse_errors", stats.parse_errors);
+    cJSON_AddNumberToObject(tu, "unknown_windows", stats.unknown_windows);
+    cJSON_AddNumberToObject(tu, "snapshot_failures", stats.snapshot_failures);
+    cJSON_AddNumberToObject(tu, "tx_truncated", stats.tx_truncated);
+    cJSON_AddNumberToObject(tu, "uart_errors", stats.uart_errors);
 
     cJSON* pb = cJSON_AddObjectToObject(json, "playback");
     cJSON_AddStringToObject(pb, "state",

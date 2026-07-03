@@ -44,16 +44,20 @@ idf_component_register(
     SRCS
         "main.cpp"
         "register_map.cpp"
-        "modbus_slave.cpp"
         "api_server.cpp"
         "playback.cpp"
+        "playback_raw.cpp"
         "wifi_manager.cpp"
         "dns_server.cpp"
         "simulation.cpp"
         "display.cpp"
         "status_led.cpp"
+        "tuya_codec/tuya_codec.cpp"
+        "tuya_state.cpp"
+        "tuya_slave.cpp"
     INCLUDE_DIRS
         "."
+        "tuya_codec"
     EMBED_FILES
         "web/index.html.gz"
         "web/portal.html.gz"
