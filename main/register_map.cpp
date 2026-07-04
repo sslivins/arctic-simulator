@@ -119,7 +119,9 @@ void loadPreset(Preset preset) {
 
     case Preset::HEATING:
         ESP_LOGI(TAG, "Loading preset: HEATING");
-        s_input[STATUS_BYTE - INPUT_BASE]          = STS_COMPRESSOR | STS_WATER_PUMP;
+        s_holding[RUN_STATE - HOLDING_BASE]        = RUN_HOT_WATER;  // running code
+        s_input[STATUS_BYTE - INPUT_BASE]          = STS_HEATING | STS_COMPRESSOR | STS_WATER_PUMP;
+        s_input[ICON_BITS2 - INPUT_BASE]           = ICO2_FAN;
         s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 50;
         s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = tempByte(5);
         s_input[INLET_WATER_TEMP - INPUT_BASE]     = tempByte(35);
@@ -137,7 +139,9 @@ void loadPreset(Preset preset) {
 
     case Preset::COOLING:
         ESP_LOGI(TAG, "Loading preset: COOLING");
+        s_holding[RUN_STATE - HOLDING_BASE]        = RUN_HOT_WATER;  // running code
         s_input[STATUS_BYTE - INPUT_BASE]          = STS_COMPRESSOR | STS_WATER_PUMP;
+        s_input[ICON_BITS2 - INPUT_BASE]           = ICO2_FAN;
         s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 60;
         s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = tempByte(35);
         s_input[INLET_WATER_TEMP - INPUT_BASE]     = tempByte(12);
@@ -155,6 +159,7 @@ void loadPreset(Preset preset) {
 
     case Preset::HOT_WATER:
         ESP_LOGI(TAG, "Loading preset: HOT_WATER");
+        s_holding[RUN_STATE - HOLDING_BASE]        = RUN_HOT_WATER;  // ON indicator (ground-truthed)
         s_input[STATUS_BYTE - INPUT_BASE]          = STS_COMPRESSOR | STS_WATER_PUMP;
         s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 55;
         s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = tempByte(20);
@@ -172,7 +177,9 @@ void loadPreset(Preset preset) {
 
     case Preset::DEFROST:
         ESP_LOGI(TAG, "Loading preset: DEFROST");
+        s_holding[RUN_STATE - HOLDING_BASE]        = RUN_HOT_WATER;  // running code
         s_input[STATUS_BYTE - INPUT_BASE]          = STS_COMPRESSOR | STS_WATER_PUMP;
+        s_input[ICON_BITS2 - INPUT_BASE]           = ICO2_DEFROST;
         s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 40;
         s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = tempByte(-2);
         s_input[INLET_WATER_TEMP - INPUT_BASE]     = tempByte(30);

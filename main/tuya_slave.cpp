@@ -60,6 +60,20 @@ std::atomic<uint32_t> s_snapshot_failures{0};
 std::atomic<uint32_t> s_tx_truncated{0};
 std::atomic<uint32_t> s_uart_errors{0};
 
+// Raw RX capture (debug aid; see header). The buffer and length are only
+// touched by the slave task (writer) and the API handler (reader). The reader
+// disarms first, so once s_cap_armed is false the buffer is stable to read.
+std::atomic<bool> s_cap_armed{false};
+uint8_t           s_cap_buf[CAPTURE_BUF_SZ];
+std::atomic<size_t> s_cap_len{0};
+
+// Decoded fc=0x06 command log (debug aid): ring of the most recent commands
+// the controller sent, so button presses / setpoint changes can be mapped
+// without decoding raw hex. Written by the slave task, read by the API.
+std::atomic<uint32_t> s_commands_seen{0};
+CommandRec s_cmd_ring[COMMAND_RING_SZ];
+std::atomic<uint32_t> s_cmd_count{0};   // total ever recorded (monotonic)
+
 // ----------------------------------------------------------------------
 // Pure handler — encodes a response into `out` for a parsed request frame.
 // Returns true if `out` now holds *out_len bytes of response. Returns
@@ -116,8 +130,12 @@ size_t handleBytesForTest(const uint8_t *in, size_t in_len,
 
     if (in_len < tuya_codec::HDR_LEN) return 0;
     const uint8_t  dir     = in[2];
+    const uint8_t  fc      = in[3];
+    const uint16_t field_a = (uint16_t)((in[4] << 8) | in[5]);
     const uint16_t field_b = (uint16_t)((in[6] << 8) | in[7]);
-    size_t need = tuya_codec::frame_total_len(dir, field_b);
+    size_t need = (fc == tuya_codec::FC_CMD)
+                    ? (tuya_codec::HDR_LEN + tuya_codec::CHK_LEN)   // command: fixed 9
+                    : tuya_codec::frame_total_len(dir, field_b);
     if (need == 0) return 2;              // bogus header — skip past 55 AA
     if (in_len < need) return 0;          // wait for more bytes
 
@@ -130,7 +148,22 @@ size_t handleBytesForTest(const uint8_t *in, size_t in_len,
     s_frames_seen.fetch_add(1, std::memory_order_relaxed);
 
     if (pf.dir == tuya_codec::DIR_REQUEST) {
-        if (encodeResponseFor(pf, out, out_capacity, out_len)) {
+        if (pf.fc == tuya_codec::FC_CMD) {
+            // Controller command (e.g. power on/off, mode, setpoint). Record it
+            // for reverse-engineering and ACK it so the controller sees the
+            // command as accepted.
+            s_commands_seen.fetch_add(1, std::memory_order_relaxed);
+            uint32_t idx = s_cmd_count.fetch_add(1, std::memory_order_relaxed);
+            s_cmd_ring[idx % COMMAND_RING_SZ] = { field_a, field_b };
+            size_t enc = tuya_codec::encode_command_ack(out, out_capacity,
+                                                        field_a, field_b);
+            if (enc > 0) {
+                *out_len = enc;
+                s_responses_sent.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                s_tx_truncated.fetch_add(1, std::memory_order_relaxed);
+            }
+        } else if (encodeResponseFor(pf, out, out_capacity, out_len)) {
             s_responses_sent.fetch_add(1, std::memory_order_relaxed);
         }
     }
@@ -148,6 +181,7 @@ Stats getStats() {
     s.snapshot_failures  = s_snapshot_failures.load(std::memory_order_relaxed);
     s.tx_truncated       = s_tx_truncated.load(std::memory_order_relaxed);
     s.uart_errors        = s_uart_errors.load(std::memory_order_relaxed);
+    s.commands_seen      = s_commands_seen.load(std::memory_order_relaxed);
     return s;
 }
 
@@ -160,7 +194,59 @@ void resetStats() {
     s_snapshot_failures.store(0);
     s_tx_truncated.store(0);
     s_uart_errors.store(0);
+    s_commands_seen.store(0);
 }
+
+size_t getRecentCommands(CommandRec *out, size_t max, uint32_t *total) {
+    uint32_t count = s_cmd_count.load(std::memory_order_relaxed);
+    if (total) *total = count;
+    if (!out || max == 0 || count == 0) return 0;
+    uint32_t avail = (count < COMMAND_RING_SZ) ? count : COMMAND_RING_SZ;
+    uint32_t n = (avail < max) ? avail : (uint32_t)max;
+    // Return the n most recent, oldest-first.
+    uint32_t first = count - n;   // index of first record to return
+    for (uint32_t i = 0; i < n; ++i) {
+        out[i] = s_cmd_ring[(first + i) % COMMAND_RING_SZ];
+    }
+    return n;
+}
+
+// ----------------------------------------------------------------------
+// Raw RX capture (debug aid). Writer is the slave task's captureAppend();
+// reader is captureCopy(), which disarms first so the buffer is stable.
+// ----------------------------------------------------------------------
+void captureArm() {
+    s_cap_armed.store(false, std::memory_order_release);
+    s_cap_len.store(0, std::memory_order_relaxed);
+    s_cap_armed.store(true, std::memory_order_release);
+}
+
+bool captureArmed() { return s_cap_armed.load(std::memory_order_acquire); }
+
+size_t captureLen() { return s_cap_len.load(std::memory_order_relaxed); }
+
+size_t captureCopy(uint8_t *out, size_t cap) {
+    s_cap_armed.store(false, std::memory_order_release);
+    size_t n = s_cap_len.load(std::memory_order_relaxed);
+    if (n > cap) n = cap;
+    if (out && n) std::memcpy(out, s_cap_buf, n);
+    return n;
+}
+
+namespace {
+// Append raw RX bytes while armed; auto-disarm when the buffer fills.
+[[maybe_unused]] inline void captureAppend(const uint8_t *data, size_t len) {
+    if (!s_cap_armed.load(std::memory_order_acquire)) return;
+    size_t have = s_cap_len.load(std::memory_order_relaxed);
+    size_t room = (have < CAPTURE_BUF_SZ) ? (CAPTURE_BUF_SZ - have) : 0;
+    size_t n = (len < room) ? len : room;
+    if (n) {
+        std::memcpy(s_cap_buf + have, data, n);
+        s_cap_len.store(have + n, std::memory_order_relaxed);
+    }
+    if (n < len) s_cap_armed.store(false, std::memory_order_release);  // full
+}
+}  // namespace
 
 // =======================================================================
 // ESP-only runtime: UART task + init/deinit
@@ -219,7 +305,7 @@ void slaveTask(void * /*arg*/) {
                         size_t to_read = (avail < room) ? avail : room;
                         int got = uart_read_bytes(port, s_blob + s_blob_len,
                                                   to_read, pdMS_TO_TICKS(5));
-                        if (got > 0) s_blob_len += (size_t)got;
+                        if (got > 0) { captureAppend(s_blob + s_blob_len, (size_t)got); s_blob_len += (size_t)got; }
                         else break;
                         uart_get_buffered_data_len(port, &avail);
                     }

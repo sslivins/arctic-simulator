@@ -10,6 +10,9 @@
  *   POST /api/registers/bulk        — Set multiple registers { "registers": { "2100": 350, ... } }
  *   POST /api/preset                — Load preset { "name": "heating" }
  *   POST /api/errors/clear          — Clear all error flags
+ *   POST /api/capture/arm           — Start recording raw RX bytes (reverse-eng)
+ *   GET  /api/capture               — Stop + return captured raw RX bytes as hex
+ *   GET  /api/commands              — Recent decoded fc=0x06 controller commands
  *   POST /api/playback/load         — Upload JSONL capture file
  *   POST /api/playback/start        — Start playback
  *   POST /api/playback/stop         — Stop playback
@@ -203,6 +206,7 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
     cJSON_AddNumberToObject(tu, "snapshot_failures", stats.snapshot_failures);
     cJSON_AddNumberToObject(tu, "tx_truncated", stats.tx_truncated);
     cJSON_AddNumberToObject(tu, "uart_errors", stats.uart_errors);
+    cJSON_AddNumberToObject(tu, "commands_seen", stats.commands_seen);
 
     cJSON* pb = cJSON_AddObjectToObject(json, "playback");
     cJSON_AddStringToObject(pb, "state",
@@ -422,6 +426,67 @@ static esp_err_t handleClearErrors(httpd_req_t* req) {
     reg::clearErrors();
     cJSON* resp = cJSON_CreateObject();
     cJSON_AddStringToObject(resp, "status", "cleared");
+    return sendJson(req, resp);
+}
+
+// ============================================================================
+// Raw RX capture endpoints (reverse-engineering aid)
+//   POST /api/capture/arm   — clear buffer + start recording raw RX bytes
+//   GET  /api/capture       — stop recording + return captured bytes as hex
+// ============================================================================
+
+static esp_err_t handleCaptureArm(httpd_req_t* req) {
+    tuya_slave::captureArm();
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "armed");
+    cJSON_AddNumberToObject(resp, "buffer_size", (double)tuya_slave::CAPTURE_BUF_SZ);
+    return sendJson(req, resp);
+}
+
+static esp_err_t handleCaptureGet(httpd_req_t* req) {
+    static uint8_t buf[tuya_slave::CAPTURE_BUF_SZ];
+    size_t n = tuya_slave::captureCopy(buf, sizeof(buf));
+
+    // Hex-encode: 2 chars per byte.
+    char* hex = (char*)malloc(n * 2 + 1);
+    if (!hex) return sendError(req, 500, "Out of memory");
+    static const char* H = "0123456789abcdef";
+    for (size_t i = 0; i < n; ++i) {
+        hex[i * 2]     = H[buf[i] >> 4];
+        hex[i * 2 + 1] = H[buf[i] & 0x0F];
+    }
+    hex[n * 2] = '\0';
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "captured");
+    cJSON_AddNumberToObject(resp, "bytes", (double)n);
+    cJSON_AddBoolToObject(resp, "truncated", n >= tuya_slave::CAPTURE_BUF_SZ);
+    cJSON_AddStringToObject(resp, "hex", hex);
+    free(hex);
+    return sendJson(req, resp);
+}
+
+// GET /api/commands — recent decoded fc=0x06 controller commands
+static esp_err_t handleGetCommands(httpd_req_t* req) {
+    tuya_slave::CommandRec recs[tuya_slave::COMMAND_RING_SZ];
+    uint32_t total = 0;
+    size_t n = tuya_slave::getRecentCommands(recs, tuya_slave::COMMAND_RING_SZ, &total);
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddNumberToObject(resp, "total", (double)total);
+    cJSON* arr = cJSON_AddArrayToObject(resp, "commands");
+    for (size_t i = 0; i < n; ++i) {
+        cJSON* c = cJSON_CreateObject();
+        char sel[8], val[8], raw[24];
+        snprintf(sel, sizeof(sel), "0x%04X", recs[i].field_a);
+        snprintf(val, sizeof(val), "0x%04X", recs[i].field_b);
+        snprintf(raw, sizeof(raw), "55AAF006%04X%04X", recs[i].field_a, recs[i].field_b);
+        cJSON_AddStringToObject(c, "selector", sel);
+        cJSON_AddStringToObject(c, "value", val);
+        cJSON_AddNumberToObject(c, "value_dec", recs[i].field_b);
+        cJSON_AddStringToObject(c, "frame", raw);
+        cJSON_AddItemToArray(arr, c);
+    }
     return sendJson(req, resp);
 }
 
@@ -673,6 +738,9 @@ esp_err_t start() {
         { "/api/registers/bulk",  HTTP_POST, handleBulkSet,       nullptr },
         { "/api/preset",          HTTP_POST, handlePreset,        nullptr },
         { "/api/errors/clear",    HTTP_POST, handleClearErrors,   nullptr },
+        { "/api/capture/arm",     HTTP_POST, handleCaptureArm,    nullptr },
+        { "/api/capture",         HTTP_GET,  handleCaptureGet,    nullptr },
+        { "/api/commands",        HTTP_GET,  handleGetCommands,   nullptr },
         { "/api/simulation",     HTTP_POST, handleSimulation,    nullptr },
         { "/api/playback/load",   HTTP_POST, handlePlaybackLoad,  nullptr },
         { "/api/playback/start",  HTTP_POST, handlePlaybackStart, nullptr },

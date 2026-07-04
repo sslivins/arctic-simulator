@@ -36,7 +36,16 @@ struct Stats {
     uint32_t snapshot_failures;  // window was registered but snapshot() returned false
     uint32_t tx_truncated;       // encode_response returned 0 or uart_write_bytes < expected
     uint32_t uart_errors;        // UART_FIFO_OVF / UART_BUFFER_FULL / framing / parity
+    uint32_t commands_seen;      // fc=0x06 controller command frames received
 };
+
+// A decoded controller command (fc=0x06): field_a is the command selector,
+// field_b the value. e.g. power ON observed as {field_a=0xFFFF, field_b=0x0001}.
+struct CommandRec {
+    uint16_t field_a;
+    uint16_t field_b;
+};
+constexpr size_t COMMAND_RING_SZ = 16;
 
 // Initialize the UART and start the slave task. Idempotent.
 esp_err_t init();
@@ -48,6 +57,40 @@ bool isInitialized();
 
 Stats getStats();
 void  resetStats();
+
+// ---------------------------------------------------------------------------
+// Raw RX capture (debug / reverse-engineering aid).
+//
+// Records every raw byte received on the RS-485 line into a fixed buffer so
+// that unknown frames (e.g. the controller writing an advanced parameter,
+// which uses a function code we don't yet decode) can be inspected verbatim.
+//
+// Usage: call captureArm() to clear the buffer and begin recording, perform
+// the action on the physical controller, then call captureCopy() to stop and
+// retrieve the bytes. Recording also stops automatically when the buffer
+// fills. No-op on the host build.
+// ---------------------------------------------------------------------------
+constexpr size_t CAPTURE_BUF_SZ = 16384;
+
+// Clear the capture buffer and start recording raw RX bytes.
+void   captureArm();
+
+// True while recording is active (auto-clears when the buffer fills).
+bool   captureArmed();
+
+// Number of bytes currently held in the capture buffer.
+size_t captureLen();
+
+// Stop recording and copy up to `cap` captured bytes into `out`. Returns the
+// number of bytes written.
+size_t captureCopy(uint8_t *out, size_t cap);
+
+// ---------------------------------------------------------------------------
+// Controller command log (fc=0x06). Returns up to `max` of the most recent
+// commands into `out` (newest last), and writes the total-ever count into
+// `*total`. Returns the number of records written.
+// ---------------------------------------------------------------------------
+size_t getRecentCommands(CommandRec *out, size_t max, uint32_t *total);
 
 // ---------------------------------------------------------------------------
 // Test seam (not part of the runtime UART loop).

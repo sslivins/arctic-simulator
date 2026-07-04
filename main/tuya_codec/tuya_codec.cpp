@@ -64,7 +64,7 @@ bool header_dir_ok(uint8_t dir)
 
 bool header_fc_ok(uint8_t fc)
 {
-    return fc == FC_READ;
+    return fc == FC_READ || fc == FC_CMD;
 }
 
 }  // namespace
@@ -90,12 +90,20 @@ ParseResult parse_frame(const uint8_t *buf, size_t buf_len, ParsedFrame &out)
     if (!header_dir_ok(dir)) return ParseResult::BAD_DIR;
     if (!header_fc_ok(fc))   return ParseResult::BAD_FC;
 
-    const RegWindow *win = find_window(a, b);
-    if (!win) return ParseResult::UNKNOWN_WINDOW;
-
-    const size_t flen = frame_total_len(dir, b);
-    if (flen == 0 || flen > MAX_FRAME_LEN) {
-        return ParseResult::UNKNOWN_WINDOW;  // implausible header
+    const RegWindow *win = nullptr;
+    size_t flen = 0;
+    if (fc == FC_CMD) {
+        // Command frame: field_a/field_b are a command selector/value, not a
+        // register window. Fixed 9-byte length in both directions (the value
+        // is inline in field_b, there is no separate payload).
+        flen = HDR_LEN + CHK_LEN;
+    } else {
+        win = find_window(a, b);
+        if (!win) return ParseResult::UNKNOWN_WINDOW;
+        flen = frame_total_len(dir, b);
+        if (flen == 0 || flen > MAX_FRAME_LEN) {
+            return ParseResult::UNKNOWN_WINDOW;  // implausible header
+        }
     }
     if (buf_len < flen) {
         return ParseResult::TRUNCATED;
@@ -114,7 +122,7 @@ ParseResult parse_frame(const uint8_t *buf, size_t buf_len, ParsedFrame &out)
     out.window      = win;
     out.frame_len   = flen;
     out.checksum    = chk_actual;
-    if (dir == DIR_RESPONSE) {
+    if (fc == FC_READ && dir == DIR_RESPONSE) {
         out.payload     = buf + HDR_LEN;
         out.payload_len = b;
     } else {
@@ -179,6 +187,16 @@ size_t encode_response(uint8_t *buf, size_t buf_capacity,
     return flen;
 }
 
+size_t encode_command_ack(uint8_t *buf, size_t buf_capacity,
+                          uint16_t field_a, uint16_t field_b)
+{
+    if (!buf) return 0;
+    if (buf_capacity < MIN_FRAME_LEN) return 0;
+    write_header(buf, DIR_RESPONSE, FC_CMD, field_a, field_b);
+    buf[HDR_LEN] = compute_checksum(buf, MIN_FRAME_LEN);
+    return MIN_FRAME_LEN;
+}
+
 // ---------------------------------------------------------------------------
 // Frame discovery
 // ---------------------------------------------------------------------------
@@ -198,7 +216,7 @@ size_t find_frame_start(const uint8_t *buf, size_t buf_len)
 
         if (!header_dir_ok(dir)) continue;
         if (!header_fc_ok(fc))   continue;
-        if (!find_window(a, b))  continue;
+        if (fc != FC_CMD && !find_window(a, b)) continue;
 
         return i;
     }
