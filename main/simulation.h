@@ -1,31 +1,22 @@
 /*
- * Reactive Simulation Engine
+ * Reactive Simulation Engine (Macon: inert)
  *
- * Maps holding register commands (written by the Modbus master / controller)
- * to input register status (read back by the master) so the simulator
- * mirrors real heat pump behaviour.
- *
- * Key mapping:
- *   UNIT_ON_OFF (2000)  + WORKING_MODE (2001)  →  STATUS_2 (2135)
- *
- * Call updateStatus() after any holding register modification (Modbus write
- * or REST API write).  Preset loads set STATUS_2 explicitly and should NOT
- * be followed by updateStatus() — they already contain the desired state.
- *
- * Simulation can be disabled (e.g. during capture playback) so that STATUS_2
- * values from the capture file are preserved rather than being overwritten.
+ * On the ECO-600 this derived the 16-bit STATUS_2 bitmap from the commanded
+ * UNIT_ON_OFF (2000) + WORKING_MODE (2001) holding registers. The Macon
+ * layout has no such command registers — the status byte (reg 2130) is
+ * authored directly by presets and the REST API — so updateStatus() is now a
+ * no-op. The enable/disable API is retained for source compatibility with
+ * existing callers and the /api/simulation endpoint.
  */
 #pragma once
 
 namespace simulation {
 
-// Enable or disable the reactive simulation engine.
-// When disabled, updateStatus() becomes a no-op.
+// Enable or disable the reactive simulation engine (currently inert).
 void setEnabled(bool enabled);
 bool isEnabled();
 
-// Call after any holding register write to recompute status registers.
-// No-op when simulation is disabled.
+// No-op on the Macon layout — status is set directly, not derived.
 void updateStatus();
 
 }  // namespace simulation

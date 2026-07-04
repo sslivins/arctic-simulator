@@ -1,16 +1,23 @@
 /*
- * Arctic Heat Pump Register Map
+ * Arctic (Macon) Heat Pump Register Map
  *
- * Address layout for the Arctic EVI heat pump as observed on the wire.
+ * Address layout for the REAL Arctic heat pump (OEM = Macon) as observed on
+ * the wire and reverse-engineered in arctic-controller applyMaconMapping().
+ * This replaces the earlier ECO-600 numbering — the Macon device reuses the
+ * same wire register numbers for entirely different fields.
+ *
  * Wire format is 1 byte/reg (see arctic-sniffer docs/TUYA-ARCTIC-PROTOCOL.md).
- * Storage here is uint16_t for historical convenience; values are masked to
- * a byte by tuya_state when handed to the slave, so anything > 255 in a
- * preset will silently truncate to its low byte.
+ * Storage here is uint16_t for convenience; values are masked to a byte by
+ * tuya_state when projected into the slave's window store, so anything > 255
+ * in a preset silently truncates to its low byte.
  *
- * Negative temperatures use signed-byte encoding (e.g. -6°C → 250).
- * Per-register scale factors for pressure / DC voltage / fan RPM are
- * UNCONFIRMED — protocol doc §6/§8. Presets here emit raw byte values
- * and do NOT pre-multiply by any assumed scale factor.
+ * Temperatures are whole °C signed bytes (e.g. -6 °C -> raw 250). Electrical
+ * scales (applied only for display, elsewhere): AC/DC voltage x10, real-time
+ * power x100, current x1.
+ *
+ * IMPORTANT: the Tuya slave serves bytes from tuya_state, NOT from this
+ * module's arrays. Every write here is mirrored into tuya_state so the wire
+ * reflects it (see register_map.cpp).
  */
 #pragma once
 
@@ -27,112 +34,54 @@ constexpr uint16_t HOLDING_COUNT = 58;   // 2000-2057
 constexpr uint16_t HOLDING_END   = HOLDING_BASE + HOLDING_COUNT - 1;
 
 constexpr uint16_t INPUT_BASE    = 2100;
-constexpr uint16_t INPUT_COUNT   = 39;   // 2100-2138
+constexpr uint16_t INPUT_COUNT   = 43;   // 2100-2142 (telemetry window reaches 2142)
 constexpr uint16_t INPUT_END     = INPUT_BASE + INPUT_COUNT - 1;
 
 // ============================================================================
-// Holding Register Addresses (R/W) — 2000–2057
+// "Holding" window (wire addr=50, base 2000) — telemetry on the Macon unit
 // ============================================================================
-constexpr uint16_t UNIT_ON_OFF           = 2000;  // 0=OFF, 1=ON
-constexpr uint16_t WORKING_MODE          = 2001;  // 0=Cool, 1=Floor heat, 2=Fan coil heat, 5=Hot water, 6=Auto
-constexpr uint16_t COOLING_SETPOINT      = 2002;
-constexpr uint16_t HEATING_SETPOINT      = 2003;
-constexpr uint16_t HOT_WATER_SETPOINT    = 2004;
-constexpr uint16_t COOLING_DELTA_T       = 2005;
-constexpr uint16_t HEATING_DELTA_T       = 2006;
-constexpr uint16_t HOT_WATER_DELTA_T     = 2007;
-constexpr uint16_t FAN_COIL_HEATING_DT   = 2008;
-
-// P1–P47 technician parameters
-constexpr uint16_t P1_EEV_OPENING        = 2009;
-constexpr uint16_t P5_STERILIZE_TIME     = 2013;
-constexpr uint16_t P13_MAX_TEMP          = 2021;
-constexpr uint16_t P23_COOL_AUTO_TEMP    = 2031;
-constexpr uint16_t P24_HEAT_AUTO_TEMP    = 2032;
-constexpr uint16_t P28_MODE_SWITCH_DELAY = 2036;
-constexpr uint16_t P29_DEFROST_CYCLE     = 2037;
-constexpr uint16_t P30_DEFROST_ENTER     = 2038;
-constexpr uint16_t P34_MAX_DEFROST_TIME  = 2042;
-constexpr uint16_t P35_DEFROST_EXIT      = 2043;
-constexpr uint16_t P41_EEV_SUPERHEAT     = 2049;
-constexpr uint16_t P44_PUMP_MODE         = 2052;
-constexpr uint16_t P47_WATERWAY_CLEAN    = 2055;
-constexpr uint16_t FREQ_CTRL_ENABLE      = 2056;
-constexpr uint16_t FREQ_CTRL_SETTING     = 2057;
+constexpr uint16_t AC_CURRENT            = 2000;  // A4  AC input current (A)
+constexpr uint16_t DC_BUS_VOLTAGE        = 2001;  // A7  DC bus voltage (x10 = V)
+constexpr uint16_t DC_MOTOR_SPEED        = 2003;  // A10 DC (fan) motor speed
+constexpr uint16_t WATER_TANK_TEMP       = 2008;  // o1  water tank temp (°C)
+constexpr uint16_t HOT_WATER_SETPOINT    = 2012;  // hot water setpoint (°C)
 
 // ============================================================================
-// Input Register Addresses (R/O) — 2100–2138
+// "Telemetry" window (wire addr=0, base 2100 after a 7-byte prefix)
 // ============================================================================
-
-// Temperatures (whole °C, no scaling; negatives use signed-byte encoding,
-// e.g. -6°C → raw byte 250. See protocol doc §6.)
-constexpr uint16_t WATER_TANK_TEMP       = 2100;
-constexpr uint16_t OUTLET_WATER_TEMP     = 2102;
-constexpr uint16_t INLET_WATER_TEMP      = 2103;
-constexpr uint16_t DISCHARGE_TEMP        = 2104;
-constexpr uint16_t SUCTION_TEMP          = 2105;
-constexpr uint16_t EVI_SUCTION_TEMP      = 2106;
-constexpr uint16_t OUTDOOR_COIL_TEMP     = 2107;
-constexpr uint16_t INDOOR_COIL_TEMP      = 2108;
-constexpr uint16_t INDOOR_AMBIENT_TEMP   = 2109;
-constexpr uint16_t OUTDOOR_AMBIENT_TEMP  = 2110;
-constexpr uint16_t HP_SAT_TEMP           = 2111;
-constexpr uint16_t LP_SAT_TEMP           = 2112;
-constexpr uint16_t EVI_LP_SAT_TEMP       = 2113;
-constexpr uint16_t IPM_TEMP              = 2114;
-constexpr uint16_t BRINE_INLET_TEMP      = 2115;
-constexpr uint16_t BRINE_OUTLET_TEMP     = 2116;
-
-// Electrical / mechanical
-constexpr uint16_t COMPRESSOR_FREQ       = 2118;
-constexpr uint16_t FAN_SPEED             = 2119;
-constexpr uint16_t AC_VOLTAGE            = 2120;
-constexpr uint16_t AC_CURRENT            = 2121;
-constexpr uint16_t DC_VOLTAGE            = 2122;  // raw byte; scale TBD
-constexpr uint16_t COMP_PHASE_CURRENT    = 2123;
-constexpr uint16_t PRIMARY_EEV           = 2124;
-constexpr uint16_t SECONDARY_EEV         = 2125;
-constexpr uint16_t HIGH_PRESSURE         = 2126;  // raw byte; scale TBD
-constexpr uint16_t LOW_PRESSURE          = 2127;  // raw byte; scale TBD
-constexpr uint16_t EE_CODING             = 2128;
-
-// Status / error registers (bit fields)
-constexpr uint16_t STATUS_1              = 2133;  // Frequency limit flags
-constexpr uint16_t ERROR_CODE_1          = 2134;  // Brine/tank sensor errors
-constexpr uint16_t STATUS_2              = 2135;  // System working status
-constexpr uint16_t STATUS_3              = 2136;  // Extended status
-constexpr uint16_t ERROR_CODE_2          = 2137;  // Sensor/communication errors
-constexpr uint16_t ERROR_CODE_3          = 2138;  // Protection errors
+constexpr uint16_t AC_VOLTAGE            = 2101;  // A13 AC input voltage (x10 = V)
+constexpr uint16_t MAIN_EEV              = 2104;  // A5  main elec. expansion valve (steps)
+constexpr uint16_t IPM_TEMP              = 2113;  // A8  IPM module temp (°C)
+constexpr uint16_t REALTIME_POWER        = 2114;  // A9  real-time power (x100 = W)
+constexpr uint16_t FAULT                 = 2128;  // fault/protection bitfield
+constexpr uint16_t RUNNING_FLAG          = 2129;  // running flag (tentative)
+constexpr uint16_t STATUS_BYTE           = 2130;  // status: bit2=comp, bit3=pump
+constexpr uint16_t OUTLET_WATER_TEMP     = 2132;  // o3  outlet (supply) water temp (°C)
+constexpr uint16_t INLET_WATER_TEMP      = 2133;  // o2  inlet (return) water temp (°C)
+constexpr uint16_t OUTDOOR_AMBIENT_TEMP  = 2134;  // o4  ambient temp (°C)
+constexpr uint16_t COOL_COIL_TEMP        = 2135;  // A6  cool coil temp (°C)
+constexpr uint16_t SUCTION_TEMP          = 2136;  // A3  suction temp (°C)
+constexpr uint16_t COIL_TEMP             = 2137;  // A2  coil temp (°C)
+constexpr uint16_t DISCHARGE_TEMP        = 2138;  // A1  discharge temp (°C)
+constexpr uint16_t COMPRESSOR_FREQ       = 2141;  // A14 compressor frequency (Hz)
 
 // ============================================================================
-// Enums
+// Status byte (reg 2130) bit definitions — active outputs.
+// Confirmed live: bit2 = compressor running, bit3 = water pump running.
+// Other bits observed but not yet decoded.
 // ============================================================================
-enum WorkingMode : uint16_t {
-    MODE_COOLING         = 0,
-    MODE_FLOOR_HEATING   = 1,
-    MODE_FAN_COIL_HEAT   = 2,
-    MODE_HOT_WATER       = 5,
-    MODE_AUTO            = 6,
+enum StatusBits : uint16_t {
+    STS_COMPRESSOR  = (1 << 2),  // 0x04
+    STS_WATER_PUMP  = (1 << 3),  // 0x08
 };
 
-// Status register 2135 bit definitions
-enum Status2Bits : uint16_t {
-    STS2_UNIT_ON         = (1 << 0),
-    STS2_COMPRESSOR      = (1 << 1),
-    STS2_FAN_HIGH        = (1 << 2),
-    STS2_FAN_MED         = (1 << 3),
-    STS2_FAN_LOW         = (1 << 4),
-    STS2_WATER_PUMP      = (1 << 5),
-    STS2_4WAY_VALVE      = (1 << 6),
-    STS2_ELEC_HEATER     = (1 << 7),
-    STS2_WATER_FLOW      = (1 << 8),
-    STS2_HP_SWITCH       = (1 << 9),
-    STS2_LP_SWITCH       = (1 << 10),
-    STS2_REMOTE_ON       = (1 << 11),
-    STS2_MODE_SWITCH     = (1 << 12),
-    STS2_3WAY_V1         = (1 << 13),
-    STS2_3WAY_V2         = (1 << 14),
-    STS2_BRINE_FLOW      = (1 << 15),
+// ============================================================================
+// Fault byte (reg 2128) bit definitions — Macon protection/fault bitfield.
+// Only bit7 confirmed live (P01 water-flow). Macon bit ordering does NOT
+// match the legacy Arctic error tables, so other bits are left undecoded.
+// ============================================================================
+enum FaultBits : uint16_t {
+    FAULT_P01_WATER_FLOW = (1 << 7),  // 0x80
 };
 
 // ============================================================================
@@ -144,19 +93,20 @@ enum class Preset {
     COOLING,
     HOT_WATER,
     DEFROST,
-    ERROR_E01,
-    ERROR_P01,
+    FAULT_P01,
 };
 
 // ============================================================================
 // API
 // ============================================================================
 
-// Initialize register map with idle defaults
+// Initialize register map with idle defaults (also seeds the tuya_state
+// telemetry-window prefix and projects the initial state onto the wire).
 void init();
 
-// Get/set individual registers by Modbus address
-// Returns ESP_ERR_NOT_FOUND for invalid addresses
+// Get/set individual registers by wire address.
+// Returns ESP_ERR_NOT_FOUND for invalid addresses. set() mirrors the value
+// into tuya_state so the Tuya slave serves it on the wire.
 uint16_t get(uint16_t addr);
 esp_err_t set(uint16_t addr, uint16_t value);
 
@@ -165,14 +115,14 @@ bool isHolding(uint16_t addr);
 bool isInput(uint16_t addr);
 bool isValid(uint16_t addr);
 
-// Bulk access — returns pointer to internal array for Modbus slave binding
+// Bulk access — returns pointer to internal array.
 uint16_t* holdingData();
 uint16_t* inputData();
 
-// Load a preset state
+// Load a preset state (mirrors the whole map into tuya_state).
 void loadPreset(Preset preset);
 
-// Clear all error flags
+// Clear the fault register.
 void clearErrors();
 
 }  // namespace reg
