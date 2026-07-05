@@ -86,8 +86,17 @@ static void clearAll() {
 }
 
 void clearErrors() {
-    s_input[FAULT - INPUT_BASE] = 0;
-    tuya_state::projectSet(FAULT, 0);
+    // Clear all four INPUT fault bitfields (reg2125-2128) ...
+    const uint16_t faultRegs[4] = { FAULT_SENSOR_EE, FAULT_SENSOR_COMP, FAULT_ELEC, FAULT };
+    for (uint16_t a : faultRegs) {
+        s_input[a - INPUT_BASE] = 0;
+        tuya_state::projectSet(a, 0);
+    }
+    // ... and the fault bits in the reg2007 run/fault register, preserving the
+    // hot-water RUN indicator (bit5, 0x20) so a running unit stays ON.
+    uint16_t rs = s_holding[RUN_STATE - HOLDING_BASE] & RUN_HOT_WATER;
+    s_holding[RUN_STATE - HOLDING_BASE] = rs;
+    tuya_state::projectSet(RUN_STATE, rs);
 }
 
 // Signed-byte encoding helper for negative temperatures (-6 °C -> 250).

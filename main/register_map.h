@@ -54,7 +54,10 @@ constexpr uint16_t AC_VOLTAGE            = 2101;  // A13 AC input voltage (x10 =
 constexpr uint16_t MAIN_EEV              = 2104;  // A5  main elec. expansion valve (steps)
 constexpr uint16_t IPM_TEMP              = 2113;  // A8  IPM module temp (°C)
 constexpr uint16_t REALTIME_POWER        = 2114;  // A9  real-time power (x100 = W)
-constexpr uint16_t FAULT                 = 2128;  // fault/protection bitfield
+constexpr uint16_t FAULT_SENSOR_EE       = 2125;  // fault bitfield: sensor/EE/comm E-codes
+constexpr uint16_t FAULT_SENSOR_COMP     = 2126;  // fault bitfield: sensor/comm/compressor (E + r01/r02)
+constexpr uint16_t FAULT_ELEC            = 2127;  // fault bitfield: electrical/power-stage (r-codes + P02/P11)
+constexpr uint16_t FAULT                 = 2128;  // fault bitfield: refrigerant/protection (P-codes)
 constexpr uint16_t ICON_BITS2            = 2129;  // icon bitfield #2 (see IconBits2)
 constexpr uint16_t STATUS_BYTE           = 2130;  // icon bitfield #1 (see StatusBits)
 constexpr uint16_t OUTLET_WATER_TEMP     = 2132;  // o3  outlet (supply) water temp (°C)
@@ -67,21 +70,28 @@ constexpr uint16_t DISCHARGE_TEMP        = 2138;  // A1  discharge temp (°C)
 constexpr uint16_t COMPRESSOR_FREQ       = 2141;  // A14 compressor frequency (Hz)
 
 // ============================================================================
-// Operating-state code (reg 2007) — THE register the OEM controller reads to
-// decide whether to show the ON / hot-water icon. Isolated live 2026-07-04 by
-// binary-search on the real bus: zeroing 2007 drops the icon; restoring it to
-// 32 brings it back. It is an enum, not a bitfield.
-//   0  = off (no icon)
-//   1  = P15 fault
-//   32 = hot-water running (ON)
-// NOTE: reg 2130 (STATUS_BYTE below) is NOT what the controller reads for the
-// icon — the real unit runs ON with 2130 = 0. Only 32 is ground-truthed; other
-// running modes (heating/cooling) reuse it as the best-known running code.
+// Operating-state / fault register (reg 2007, HOLDING) — THE register the OEM
+// controller reads to decide whether to show the ON / hot-water icon. Isolated
+// live 2026-07-04, then FULLY MAPPED 2026-07-05: it is an 8-bit BITFIELD (not an
+// enum). bit5 (0x20) = the hot-water RUN indicator; bits0-3 = differential /
+// temp-diff faults; bits 4/6/7 unused.
+//   bit0 0x01 = P15 (inlet/outlet ΔT too large)
+//   bit1 0x02 = P16 (outlet water temp too low)
+//   bit2 0x04 = FE  (start differential-pressure protection; app shows offline)
+//   bit3 0x08 = FF  (run differential protection; app shows offline)
+//   bit5 0x20 = hot-water RUNNING (ON) indicator
+// NOTE: reg 2130 (STATUS_BYTE below) is NOT what the controller reads for the ON
+// icon — the real unit runs ON with 2130 = 0. Only bit5 (0x20) is the confirmed
+// running code on this DHW controller; other running modes (heating/cooling)
+// reuse it as the best-known running code.
 // ============================================================================
 enum RunState : uint16_t {
     RUN_OFF        = 0,
-    RUN_FAULT_P15  = 1,
-    RUN_HOT_WATER  = 32,  // 0x20
+    RUN_FAULT_P15  = (1 << 0),  // 0x01
+    RUN_FAULT_P16  = (1 << 1),  // 0x02
+    RUN_FAULT_FE   = (1 << 2),  // 0x04
+    RUN_FAULT_FF   = (1 << 3),  // 0x08
+    RUN_HOT_WATER  = (1 << 5),  // 0x20  hot-water running (ON)
 };
 
 // ============================================================================
@@ -118,10 +128,53 @@ enum IconBits2 : uint16_t {
     ICO2_DEFROST = (1 << 1),  // 0x02  defrost icon
     ICO2_FAN     = (1 << 4),  // 0x10  fan icon
 };
-// match the legacy Arctic error tables, so other bits are left undecoded.
 // ============================================================================
-enum FaultBits : uint16_t {
-    FAULT_P01_WATER_FLOW = (1 << 7),  // 0x80
+// Fault bitfields (INPUT window) — four 8-bit protection/fault registers, all
+// mapped live 2026-07-05 one bit at a time against the OEM LCD + Smart Life app
+// and cross-referenced to the official Arctic fault catalog. When multiple bits
+// are set the OEM controller CYCLES through the active codes. "PT" in app text =
+// "Protection". The input fault cluster is exactly reg2125-2128 (reg2124=timer
+// mode, reg2131=A-code diag scroll — NOT faults).
+// ============================================================================
+enum FaultRefrigBits : uint16_t {   // reg2128 — refrigerant / P-codes
+    FAULT_P06_LOW_PRESS    = (1 << 0),  // 0x01
+    FAULT_P27_COIL_OVERHEAT= (1 << 1),  // 0x02
+    FAULT_PC_AMBIENT       = (1 << 2),  // 0x04
+    FAULT_P10              = (1 << 3),  // 0x08 (device code, not in manual)
+    FAULT_P30_ANTIFREEZE   = (1 << 4),  // 0x10
+    FAULT_E05_COIL_SENSOR  = (1 << 5),  // 0x20
+    FAULT_P01_WATER_FLOW   = (1 << 7),  // 0x80
+};
+
+enum FaultElecBits : uint16_t {     // reg2127 — electrical / r-codes + P02/P11
+    FAULT_P19_AC_CURRENT   = (1 << 1),  // 0x02
+    FAULT_R06_COMP_PHASE   = (1 << 2),  // 0x04
+    FAULT_R10_AC_VOLTAGE   = (1 << 3),  // 0x08
+    FAULT_R11_DC_BUS       = (1 << 4),  // 0x10
+    FAULT_R05_IPM_TEMP     = (1 << 5),  // 0x20
+    FAULT_P11_HIGH_DISCH   = (1 << 6),  // 0x40
+    FAULT_P02_HIGH_PRESS   = (1 << 7),  // 0x80
+};
+
+enum FaultSensorCompBits : uint16_t {  // reg2126 — sensor/comm/compressor
+    FAULT_R02_COMP_START   = (1 << 0),  // 0x01
+    FAULT_E26_INOUT_COMM   = (1 << 1),  // 0x02
+    FAULT_R01_IPM          = (1 << 2),  // 0x04
+    FAULT_E01_DISCHARGE_SNS= (1 << 4),  // 0x10
+    FAULT_E09_SUCTION_SNS  = (1 << 5),  // 0x20
+    FAULT_E05_COIL_SNS     = (1 << 6),  // 0x40
+    FAULT_E22_AMBIENT_SNS  = (1 << 7),  // 0x80
+};
+
+enum FaultSensorEeBits : uint16_t {    // reg2125 — sensor/EE/comm E-codes
+    FAULT_E28_OUTDOOR_EE   = (1 << 0),  // 0x01
+    FAULT_E19_INLET_SNS    = (1 << 1),  // 0x02
+    FAULT_E18_OUTLET_SNS   = (1 << 2),  // 0x04
+    FAULT_E13_COOLCOIL_SNS = (1 << 3),  // 0x08
+    FAULT_E03              = (1 << 4),  // 0x10 (device code, not in manual)
+    FAULT_E28_INDOOR_EE    = (1 << 5),  // 0x20
+    FAULT_E27_DRIVER_COMM  = (1 << 6),  // 0x40
+    FAULT_E21_CTRL_COMM    = (1 << 7),  // 0x80
 };
 
 // ============================================================================
