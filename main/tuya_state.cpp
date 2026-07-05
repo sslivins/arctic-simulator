@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 #include "tuya_state.h"
-#include "tuya_codec/tuya_codec.h"
+#include "tuya_codec.h"
 
 #include <cstring>
 

@@ -52,12 +52,10 @@ idf_component_register(
         "simulation.cpp"
         "display.cpp"
         "status_led.cpp"
-        "tuya_codec/tuya_codec.cpp"
         "tuya_state.cpp"
         "tuya_slave.cpp"
     INCLUDE_DIRS
         "."
-        "tuya_codec"
     EMBED_FILES
         "web/index.html.gz"
         "web/portal.html.gz"
@@ -73,4 +71,5 @@ idf_component_register(
         vfs
         lwip
         esp_lcd
+        arctic-macon
 )

@@ -10,3 +10,4 @@ __pycache__/
 *.swo
 *~
 main/web/*.gz
+tests/build-host/
