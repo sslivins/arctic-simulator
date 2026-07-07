@@ -26,10 +26,11 @@ enable_testing()
 add_executable(test_tuya_state
     test_tuya_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_state.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_codec/tuya_codec.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/arctic-macon/src/tuya_codec.cpp
 )
 target_include_directories(test_tuya_state PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/arctic-macon/include
 )
 
 add_test(NAME tuya_state COMMAND test_tuya_state)
@@ -39,10 +40,11 @@ add_executable(test_tuya_slave
     test_tuya_slave.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_slave.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_state.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_codec/tuya_codec.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/arctic-macon/src/tuya_codec.cpp
 )
 target_include_directories(test_tuya_slave PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/arctic-macon/include
 )
 
 add_test(NAME tuya_slave COMMAND test_tuya_slave)
@@ -52,10 +54,11 @@ add_executable(test_tuya_slave_golden
     test_tuya_slave_golden.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_slave.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_state.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_codec/tuya_codec.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/arctic-macon/src/tuya_codec.cpp
 )
 target_include_directories(test_tuya_slave_golden PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/arctic-macon/include
 )
 target_compile_definitions(test_tuya_slave_golden PRIVATE
     CAPTURE_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
@@ -67,10 +70,11 @@ add_test(NAME tuya_slave_golden COMMAND test_tuya_slave_golden)
 add_executable(test_playback_raw
     test_playback_raw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/playback_raw.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../main/tuya_codec/tuya_codec.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/arctic-macon/src/tuya_codec.cpp
 )
 target_include_directories(test_playback_raw PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/arctic-macon/include
 )
 
 add_test(NAME playback_raw COMMAND test_playback_raw)

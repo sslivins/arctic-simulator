@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 #include "playback_raw.h"
-#include "tuya_codec/tuya_codec.h"
+#include "tuya_codec.h"
 
 #include <cstdio>
 #include <cstdlib>
