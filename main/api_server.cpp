@@ -2,7 +2,7 @@
  * REST API Server — Implementation
  *
  * Endpoints:
- *   GET  /api/status                — Simulator status + Modbus stats
+ *   GET  /api/status                -- Simulator status + Tuya stats
  *   GET  /api/heatpump              — Abstracted heat pump state
  *   GET  /api/registers             — All register values (raw)
  *   GET  /api/registers?addr=XXXX   — Single register
@@ -10,6 +10,9 @@
  *   POST /api/registers/bulk        — Set multiple registers { "registers": { "2100": 350, ... } }
  *   POST /api/preset                — Load preset { "name": "heating" }
  *   POST /api/errors/clear          — Clear all error flags
+ *   POST /api/capture/arm           — Start recording raw RX bytes (reverse-eng)
+ *   GET  /api/capture               — Stop + return captured raw RX bytes as hex
+ *   GET  /api/commands              — Recent decoded fc=0x06 controller commands
  *   POST /api/playback/load         — Upload JSONL capture file
  *   POST /api/playback/start        — Start playback
  *   POST /api/playback/stop         — Stop playback
@@ -21,7 +24,7 @@
  */
 #include "api_server.h"
 #include "register_map.h"
-#include "modbus_slave.h"
+#include "tuya_slave.h"
 #include "simulation.h"
 #include "playback.h"
 #include "wifi_manager.h"
@@ -62,55 +65,18 @@ static esp_err_t handleDashboard(httpd_req_t* req) {
 // Helpers
 // ============================================================================
 
-static const char* modeToString(uint16_t mode) {
-    switch (mode) {
-    case reg::MODE_COOLING:       return "cooling";
-    case reg::MODE_FLOOR_HEATING: return "floor_heating";
-    case reg::MODE_FAN_COIL_HEAT: return "fan_coil_heating";
-    case reg::MODE_HOT_WATER:     return "hot_water";
-    case reg::MODE_AUTO:          return "auto";
-    default:                      return "unknown";
+static void addActiveFaults(cJSON* arr, uint16_t fault) {
+    // Macon fault byte (reg 2128). Only bit7 (P01 water-flow) is confirmed;
+    // any other set bit is reported generically so the raw value stays visible
+    // for the ongoing fault-bit reverse-engineering.
+    if (fault & reg::FAULT_P01_WATER_FLOW) {
+        cJSON_AddItemToArray(arr, cJSON_CreateString("P01_water_flow"));
     }
-}
-
-static const char* fanSpeedString(uint16_t sts2) {
-    if (sts2 & reg::STS2_FAN_HIGH) return "high";
-    if (sts2 & reg::STS2_FAN_MED)  return "medium";
-    if (sts2 & reg::STS2_FAN_LOW)  return "low";
-    return "off";
-}
-
-static void addActiveErrors(cJSON* arr, uint16_t ec1, uint16_t ec2, uint16_t ec3) {
-    // Error Code 1 (register 2134) — brine/tank sensor errors
-    const char* ec1_names[] = {
-        "brine_inlet_sensor", "brine_outlet_sensor", "brine_flow_protection", "tank_sensor"
-    };
-    for (int i = 0; i < 4; i++) {
-        if (ec1 & (1 << i)) cJSON_AddItemToArray(arr, cJSON_CreateString(ec1_names[i]));
-    }
-
-    // Error Code 2 (register 2137) — sensor/communication errors
-    const char* ec2_names[] = {
-        "indoor_ee", "outdoor_ee", "inlet_water_sensor", "outlet_water_sensor",
-        "antifreeze_protection", "external_coil_sensor", "discharge_sensor",
-        "suction_sensor", "ambient_sensor", "drive_board_comm",
-        "wired_controller_comm", "compressor_abnormal", "indoor_outdoor_comm",
-        "ipm_error", "high_outlet_temp", "high_pressure"
-    };
-    for (int i = 0; i < 16; i++) {
-        if (ec2 & (1 << i)) cJSON_AddItemToArray(arr, cJSON_CreateString(ec2_names[i]));
-    }
-
-    // Error Code 3 (register 2138) — protection errors
-    const char* ec3_names[] = {
-        "low_pressure", "discharge_overtemp", "outdoor_ambient_sensor",
-        "suction_overtemp", "compressor_overcurrent", "dc_bus_overvoltage",
-        "phase_loss", "ipm_overtemp", "fan_motor_error", "compressor_phase_error",
-        "eev_sensor", "outdoor_comm", "water_flow_protection",
-        "compressor_freq_limit", "dc_bus_undervoltage", "ac_overcurrent"
-    };
-    for (int i = 0; i < 16; i++) {
-        if (ec3 & (1 << i)) cJSON_AddItemToArray(arr, cJSON_CreateString(ec3_names[i]));
+    uint16_t undecoded = fault & ~(uint16_t)reg::FAULT_P01_WATER_FLOW;
+    if (undecoded) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "undecoded_0x%02X", undecoded & 0xFF);
+        cJSON_AddItemToArray(arr, cJSON_CreateString(buf));
     }
 }
 
@@ -160,74 +126,57 @@ static char* readBody(httpd_req_t* req, int max_len = 8192) {
 // ============================================================================
 
 static esp_err_t handleGetHeatpump(httpd_req_t* req) {
-    uint16_t sts2 = reg::get(reg::STATUS_2);
-    uint16_t sts3 = reg::get(reg::STATUS_3);
+    uint16_t status = reg::get(reg::STATUS_BYTE);
+    uint16_t fault  = reg::get(reg::FAULT);
 
     cJSON* json = cJSON_CreateObject();
 
-    // --- Power & operating mode ---
-    cJSON_AddBoolToObject(json, "unit_on", (sts2 & reg::STS2_UNIT_ON) != 0);
-    cJSON_AddStringToObject(json, "mode", modeToString(reg::get(reg::WORKING_MODE)));
-    cJSON_AddNumberToObject(json, "mode_raw", reg::get(reg::WORKING_MODE));
+    // --- Running state (derived from the Macon status byte, reg 2130) ---
+    bool compressor_on = (status & reg::STS_COMPRESSOR) != 0;
+    bool pump_on       = (status & reg::STS_WATER_PUMP) != 0;
+    cJSON_AddBoolToObject(json, "running", compressor_on || pump_on);
+    cJSON_AddNumberToObject(json, "status_raw", status);
 
-    // --- Setpoints (commanded by controller) ---
+    // --- Setpoint ---
     cJSON* sp = cJSON_AddObjectToObject(json, "setpoints");
-    cJSON_AddNumberToObject(sp, "cooling", reg::get(reg::COOLING_SETPOINT));
-    cJSON_AddNumberToObject(sp, "heating", reg::get(reg::HEATING_SETPOINT));
-    cJSON_AddNumberToObject(sp, "hot_water", reg::get(reg::HOT_WATER_SETPOINT));
+    cJSON_AddNumberToObject(sp, "hot_water", (int8_t)reg::get(reg::HOT_WATER_SETPOINT));
 
-    // --- Temperatures ---
+    // --- Temperatures (whole °C, signed byte) ---
     cJSON* temps = cJSON_AddObjectToObject(json, "temperatures");
-    cJSON_AddNumberToObject(temps, "outlet_water", reg::get(reg::OUTLET_WATER_TEMP));
-    cJSON_AddNumberToObject(temps, "inlet_water", reg::get(reg::INLET_WATER_TEMP));
-    cJSON_AddNumberToObject(temps, "water_tank", reg::get(reg::WATER_TANK_TEMP));
-    cJSON_AddNumberToObject(temps, "outdoor_ambient", reg::get(reg::OUTDOOR_AMBIENT_TEMP));
-    cJSON_AddNumberToObject(temps, "discharge", reg::get(reg::DISCHARGE_TEMP));
-    cJSON_AddNumberToObject(temps, "suction", reg::get(reg::SUCTION_TEMP));
-    cJSON_AddNumberToObject(temps, "outdoor_coil", reg::get(reg::OUTDOOR_COIL_TEMP));
-    cJSON_AddNumberToObject(temps, "indoor_coil", reg::get(reg::INDOOR_COIL_TEMP));
-    cJSON_AddNumberToObject(temps, "ipm", reg::get(reg::IPM_TEMP));
+    cJSON_AddNumberToObject(temps, "outlet_water", (int8_t)reg::get(reg::OUTLET_WATER_TEMP));
+    cJSON_AddNumberToObject(temps, "inlet_water", (int8_t)reg::get(reg::INLET_WATER_TEMP));
+    cJSON_AddNumberToObject(temps, "water_tank", (int8_t)reg::get(reg::WATER_TANK_TEMP));
+    cJSON_AddNumberToObject(temps, "outdoor_ambient", (int8_t)reg::get(reg::OUTDOOR_AMBIENT_TEMP));
+    cJSON_AddNumberToObject(temps, "discharge", (int8_t)reg::get(reg::DISCHARGE_TEMP));
+    cJSON_AddNumberToObject(temps, "suction", (int8_t)reg::get(reg::SUCTION_TEMP));
+    cJSON_AddNumberToObject(temps, "coil", (int8_t)reg::get(reg::COIL_TEMP));
+    cJSON_AddNumberToObject(temps, "cool_coil", (int8_t)reg::get(reg::COOL_COIL_TEMP));
+    cJSON_AddNumberToObject(temps, "ipm", (int8_t)reg::get(reg::IPM_TEMP));
 
-    // --- Compressor & electrical ---
+    // --- Compressor ---
     cJSON* comp = cJSON_AddObjectToObject(json, "compressor");
-    cJSON_AddBoolToObject(comp, "running", (sts2 & reg::STS2_COMPRESSOR) != 0);
+    cJSON_AddBoolToObject(comp, "running", compressor_on);
     cJSON_AddNumberToObject(comp, "frequency", reg::get(reg::COMPRESSOR_FREQ));
-    cJSON_AddNumberToObject(comp, "phase_current", reg::get(reg::COMP_PHASE_CURRENT));
 
+    // --- Electrical (display scales: voltages x10 V, power x100 W) ---
     cJSON* elec = cJSON_AddObjectToObject(json, "electrical");
-    cJSON_AddNumberToObject(elec, "ac_voltage", reg::get(reg::AC_VOLTAGE));
+    cJSON_AddNumberToObject(elec, "ac_voltage", reg::get(reg::AC_VOLTAGE) * 10);
     cJSON_AddNumberToObject(elec, "ac_current", reg::get(reg::AC_CURRENT));
-    // DC voltage stored as raw × 10 — convert to actual volts
-    cJSON_AddNumberToObject(elec, "dc_voltage", reg::get(reg::DC_VOLTAGE) / 10.0);
-
-    // --- Pressure (stored as raw × 100 — convert to MPa) ---
-    cJSON* pressure = cJSON_AddObjectToObject(json, "pressure");
-    cJSON_AddNumberToObject(pressure, "high", reg::get(reg::HIGH_PRESSURE) / 100.0);
-    cJSON_AddNumberToObject(pressure, "low", reg::get(reg::LOW_PRESSURE) / 100.0);
+    cJSON_AddNumberToObject(elec, "dc_bus_voltage", reg::get(reg::DC_BUS_VOLTAGE) * 10);
+    cJSON_AddNumberToObject(elec, "realtime_power", reg::get(reg::REALTIME_POWER) * 100);
 
     // --- Peripherals ---
     cJSON* periph = cJSON_AddObjectToObject(json, "peripherals");
-    cJSON_AddStringToObject(periph, "fan_speed", fanSpeedString(sts2));
-    cJSON_AddNumberToObject(periph, "fan_rpm", reg::get(reg::FAN_SPEED));
-    cJSON_AddBoolToObject(periph, "water_pump", (sts2 & reg::STS2_WATER_PUMP) != 0);
-    cJSON_AddBoolToObject(periph, "water_flow", (sts2 & reg::STS2_WATER_FLOW) != 0);
-    cJSON_AddBoolToObject(periph, "four_way_valve", (sts2 & reg::STS2_4WAY_VALVE) != 0);
-    cJSON_AddBoolToObject(periph, "electric_heater", (sts2 & reg::STS2_ELEC_HEATER) != 0);
-    cJSON_AddBoolToObject(periph, "three_way_v1", (sts2 & reg::STS2_3WAY_V1) != 0);
-    cJSON_AddBoolToObject(periph, "three_way_v2", (sts2 & reg::STS2_3WAY_V2) != 0);
-    cJSON_AddNumberToObject(periph, "primary_eev", reg::get(reg::PRIMARY_EEV));
-    cJSON_AddNumberToObject(periph, "secondary_eev", reg::get(reg::SECONDARY_EEV));
-    cJSON_AddBoolToObject(periph, "defrost", (sts3 & (1 << 5)) != 0);
+    cJSON_AddBoolToObject(periph, "water_pump", pump_on);
+    cJSON_AddNumberToObject(periph, "main_eev", reg::get(reg::MAIN_EEV));
+    cJSON_AddNumberToObject(periph, "fan_speed", reg::get(reg::DC_MOTOR_SPEED));
 
-    // --- Errors ---
-    uint16_t ec1 = reg::get(reg::ERROR_CODE_1);
-    uint16_t ec2 = reg::get(reg::ERROR_CODE_2);
-    uint16_t ec3 = reg::get(reg::ERROR_CODE_3);
-    bool has_errors = (ec1 | ec2 | ec3) != 0;
-    cJSON_AddBoolToObject(json, "has_errors", has_errors);
-    cJSON* errors = cJSON_AddArrayToObject(json, "errors");
-    if (has_errors) {
-        addActiveErrors(errors, ec1, ec2, ec3);
+    // --- Faults (reg 2128) ---
+    cJSON_AddBoolToObject(json, "has_faults", fault != 0);
+    cJSON_AddNumberToObject(json, "fault_raw", fault);
+    cJSON* faults = cJSON_AddArrayToObject(json, "faults");
+    if (fault) {
+        addActiveFaults(faults, fault);
     }
 
     return sendJson(req, json);
@@ -238,7 +187,7 @@ static esp_err_t handleGetHeatpump(httpd_req_t* req) {
 // ============================================================================
 
 static esp_err_t handleGetStatus(httpd_req_t* req) {
-    auto stats = mb_slave::getStats();
+    auto stats = tuya_slave::getStats();
     auto pb_status = playback::getStatus();
 
     cJSON* json = cJSON_CreateObject();
@@ -246,12 +195,18 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
     const esp_app_desc_t* app = esp_app_get_description();
     cJSON_AddStringToObject(json, "version", app->version);
     cJSON_AddStringToObject(json, "hostname", wifi::getHostname());
-    cJSON_AddBoolToObject(json, "modbus_active", mb_slave::isInitialized());
+    cJSON_AddBoolToObject(json, "tuya_active", tuya_slave::isInitialized());
 
-    cJSON* mb = cJSON_AddObjectToObject(json, "modbus_stats");
-    cJSON_AddNumberToObject(mb, "reads", stats.read_count);
-    cJSON_AddNumberToObject(mb, "writes", stats.write_count);
-    cJSON_AddNumberToObject(mb, "errors", stats.error_count);
+    cJSON* tu = cJSON_AddObjectToObject(json, "tuya_stats");
+    cJSON_AddNumberToObject(tu, "frames_seen", stats.frames_seen);
+    cJSON_AddNumberToObject(tu, "requests_handled", stats.requests_handled);
+    cJSON_AddNumberToObject(tu, "responses_sent", stats.responses_sent);
+    cJSON_AddNumberToObject(tu, "parse_errors", stats.parse_errors);
+    cJSON_AddNumberToObject(tu, "unknown_windows", stats.unknown_windows);
+    cJSON_AddNumberToObject(tu, "snapshot_failures", stats.snapshot_failures);
+    cJSON_AddNumberToObject(tu, "tx_truncated", stats.tx_truncated);
+    cJSON_AddNumberToObject(tu, "uart_errors", stats.uart_errors);
+    cJSON_AddNumberToObject(tu, "commands_seen", stats.commands_seen);
 
     cJSON* pb = cJSON_AddObjectToObject(json, "playback");
     cJSON_AddStringToObject(pb, "state",
@@ -448,11 +403,10 @@ static esp_err_t handlePreset(httpd_req_t* req) {
     else if (strcmp(n, "cooling") == 0)   preset = reg::Preset::COOLING;
     else if (strcmp(n, "hot_water") == 0) preset = reg::Preset::HOT_WATER;
     else if (strcmp(n, "defrost") == 0)   preset = reg::Preset::DEFROST;
-    else if (strcmp(n, "error_e01") == 0) preset = reg::Preset::ERROR_E01;
-    else if (strcmp(n, "error_p01") == 0) preset = reg::Preset::ERROR_P01;
+    else if (strcmp(n, "fault_p01") == 0) preset = reg::Preset::FAULT_P01;
     else {
         cJSON_Delete(json);
-        return sendError(req, 400, "Unknown preset. Valid: idle, heating, cooling, hot_water, defrost, error_e01, error_p01");
+        return sendError(req, 400, "Unknown preset. Valid: idle, heating, cooling, hot_water, defrost, fault_p01");
     }
     cJSON_Delete(json);
 
@@ -472,6 +426,67 @@ static esp_err_t handleClearErrors(httpd_req_t* req) {
     reg::clearErrors();
     cJSON* resp = cJSON_CreateObject();
     cJSON_AddStringToObject(resp, "status", "cleared");
+    return sendJson(req, resp);
+}
+
+// ============================================================================
+// Raw RX capture endpoints (reverse-engineering aid)
+//   POST /api/capture/arm   — clear buffer + start recording raw RX bytes
+//   GET  /api/capture       — stop recording + return captured bytes as hex
+// ============================================================================
+
+static esp_err_t handleCaptureArm(httpd_req_t* req) {
+    tuya_slave::captureArm();
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "armed");
+    cJSON_AddNumberToObject(resp, "buffer_size", (double)tuya_slave::CAPTURE_BUF_SZ);
+    return sendJson(req, resp);
+}
+
+static esp_err_t handleCaptureGet(httpd_req_t* req) {
+    static uint8_t buf[tuya_slave::CAPTURE_BUF_SZ];
+    size_t n = tuya_slave::captureCopy(buf, sizeof(buf));
+
+    // Hex-encode: 2 chars per byte.
+    char* hex = (char*)malloc(n * 2 + 1);
+    if (!hex) return sendError(req, 500, "Out of memory");
+    static const char* H = "0123456789abcdef";
+    for (size_t i = 0; i < n; ++i) {
+        hex[i * 2]     = H[buf[i] >> 4];
+        hex[i * 2 + 1] = H[buf[i] & 0x0F];
+    }
+    hex[n * 2] = '\0';
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "captured");
+    cJSON_AddNumberToObject(resp, "bytes", (double)n);
+    cJSON_AddBoolToObject(resp, "truncated", n >= tuya_slave::CAPTURE_BUF_SZ);
+    cJSON_AddStringToObject(resp, "hex", hex);
+    free(hex);
+    return sendJson(req, resp);
+}
+
+// GET /api/commands — recent decoded fc=0x06 controller commands
+static esp_err_t handleGetCommands(httpd_req_t* req) {
+    tuya_slave::CommandRec recs[tuya_slave::COMMAND_RING_SZ];
+    uint32_t total = 0;
+    size_t n = tuya_slave::getRecentCommands(recs, tuya_slave::COMMAND_RING_SZ, &total);
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddNumberToObject(resp, "total", (double)total);
+    cJSON* arr = cJSON_AddArrayToObject(resp, "commands");
+    for (size_t i = 0; i < n; ++i) {
+        cJSON* c = cJSON_CreateObject();
+        char sel[8], val[8], raw[24];
+        snprintf(sel, sizeof(sel), "0x%04X", recs[i].field_a);
+        snprintf(val, sizeof(val), "0x%04X", recs[i].field_b);
+        snprintf(raw, sizeof(raw), "55AAF006%04X%04X", recs[i].field_a, recs[i].field_b);
+        cJSON_AddStringToObject(c, "selector", sel);
+        cJSON_AddStringToObject(c, "value", val);
+        cJSON_AddNumberToObject(c, "value_dec", recs[i].field_b);
+        cJSON_AddStringToObject(c, "frame", raw);
+        cJSON_AddItemToArray(arr, c);
+    }
     return sendJson(req, resp);
 }
 
@@ -723,6 +738,9 @@ esp_err_t start() {
         { "/api/registers/bulk",  HTTP_POST, handleBulkSet,       nullptr },
         { "/api/preset",          HTTP_POST, handlePreset,        nullptr },
         { "/api/errors/clear",    HTTP_POST, handleClearErrors,   nullptr },
+        { "/api/capture/arm",     HTTP_POST, handleCaptureArm,    nullptr },
+        { "/api/capture",         HTTP_GET,  handleCaptureGet,    nullptr },
+        { "/api/commands",        HTTP_GET,  handleGetCommands,   nullptr },
         { "/api/simulation",     HTTP_POST, handleSimulation,    nullptr },
         { "/api/playback/load",   HTTP_POST, handlePlaybackLoad,  nullptr },
         { "/api/playback/start",  HTTP_POST, handlePlaybackStart, nullptr },

@@ -103,11 +103,11 @@ textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background:
 <!-- Status -->
 <div class="card">
   <div class="status-bar">
-    <div class="item"><span class="dot" id="dot-modbus"></span> Modbus</div>
+    <div class="item"><span class="dot" id="dot-tuya"></span> Tuya</div>
     <div class="item"><span class="dot" id="dot-wifi"></span> WiFi</div>
     <div class="item" id="version-info"></div>
   </div>
-  <div class="stats" id="modbus-stats"></div>
+  <div class="stats" id="tuya-stats"></div>
 </div>
 
 <!-- Controller Commands (holding registers — read-only, written by master) -->
@@ -400,11 +400,11 @@ async function refresh() {
     const statusResp = await fetch(BASE + '/api/status');
     if (statusResp.ok) {
       const s = await statusResp.json();
-      document.getElementById('dot-modbus').className = 'dot ' + (s.modbus_active ? 'on' : 'off');
+      document.getElementById('dot-tuya').className = 'dot ' + (s.tuya_active ? 'on' : 'off');
       document.getElementById('dot-wifi').className = 'dot on';
       document.getElementById('version-info').textContent = 'v' + s.version;
-      document.getElementById('modbus-stats').textContent =
-        `Reads: ${s.modbus_stats.reads}  Writes: ${s.modbus_stats.writes}  Errors: ${s.modbus_stats.errors}`;
+      document.getElementById('tuya-stats').textContent =
+        `Frames: ${s.tuya_stats.frames_seen}  Req: ${s.tuya_stats.requests_handled}  Resp: ${s.tuya_stats.responses_sent}  Errors: ${s.tuya_stats.parse_errors}`;
       // Don't overwrite playback state when browser has a capture loaded
       if (!pbTimer && pbEntries.length === 0) {
         document.getElementById('playback-state').textContent =

@@ -101,7 +101,7 @@ GET  /api/playback/status        # Playback state and position
 One JSON object per line. Each entry represents a register snapshot at a point in time.
 
 ```jsonl
-{"t":0,"fc":3,"addr":2100,"count":39,"values":[200,0,250,250,750,30,0,20,0,0,50,0,0,0,450,0,0,0,55,600,230,8,3200,0,200,0,250,80,1,0,0,0,0,0,0,33,0,0,0]}
+{"t":0,"fc":3,"addr":2100,"count":39,"values":[200,0,250,250,250,30,0,20,0,0,50,0,0,0,250,0,0,0,55,200,12,8,1,0,200,0,250,80,1,0,0,0,0,0,0,33,0,0,0]}
 {"t":500,"fc":3,"addr":2000,"count":58,"values":[1,1,70,450,550,50,50,50,50,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,250,200,0,0,0,0,37,38,0,0,0,43,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
 {"t":1000,"fc":6,"addr":2000,"value":1}
 ```
@@ -143,10 +143,12 @@ arctic-simulator/
 ├── main/
 │   ├── CMakeLists.txt          # Component registration
 │   ├── Kconfig.projbuild       # Menuconfig options
-│   ├── idf_component.yml       # esp-modbus, mdns dependencies
+│   ├── idf_component.yml       # mdns, led_strip dependencies
 │   ├── main.cpp                # Entry point, task creation
 │   ├── register_map.h/cpp      # Register storage, presets
-│   ├── modbus_slave.h/cpp      # Modbus RTU slave (esp_modbus)
+│   ├── tuya_codec/             # Tuya MCU framing (vendored from sniffer)
+│   ├── tuya_state.h/cpp        # Byte-store + mutex-guarded snapshots
+│   ├── tuya_slave.h/cpp        # Tuya MCU slave over RS-485
 │   ├── api_server.h/cpp        # REST API (esp_http_server)
 │   ├── playback.h/cpp          # JSONL capture replay engine
 │   └── wifi_manager.h/cpp      # WiFi STA + mDNS

@@ -13,7 +13,6 @@
  */
 #include "display.h"
 #include "register_map.h"
-#include "modbus_slave.h"
 #include "playback.h"
 #include "wifi_manager.h"
 
@@ -240,12 +239,9 @@ static void fbDrawStrCentered(int y, const char* str, uint16_t fg, uint16_t bg,
 }
 
 // ── Change detection state ─────────────────────────────────────────────
-static uint16_t s_prev_on_off   = 0xFFFF;  // force initial display
-static uint16_t s_prev_mode     = 0xFFFF;
-static uint16_t s_prev_ec1      = 0;
-static uint16_t s_prev_ec2      = 0;
-static uint16_t s_prev_ec3      = 0;
-static uint16_t s_prev_status2  = 0;
+static uint16_t s_prev_status   = 0xFFFF;  // force initial display
+static uint16_t s_prev_fault    = 0xFFFF;
+static uint16_t s_prev_freq     = 0xFFFF;
 
 // Current notification — persists until next change
 static char     s_notif_line1[22] = "";   // fits 21 chars at 1x scale
@@ -283,85 +279,51 @@ static void renderProvisioningUI() {
 }
 
 /// Map mode number to short display name.
-static const char* modeLabel(uint16_t mode) {
-    switch (mode) {
-    case reg::MODE_COOLING:       return "Cooling";
-    case reg::MODE_FLOOR_HEATING: return "Floor Heat";
-    case reg::MODE_FAN_COIL_HEAT: return "Fan Coil Heat";
-    case reg::MODE_HOT_WATER:     return "Hot Water";
-    case reg::MODE_AUTO:          return "Auto";
-    default:                      return "Unknown";
-    }
+static const char* runStateLabel(uint16_t status) {
+    if (status & reg::STS_COMPRESSOR) return "Running";
+    if (status & reg::STS_WATER_PUMP) return "Pump";
+    return "Idle";
 }
 
 /// Check key registers for changes and update notification.
 static void detectChanges() {
-    uint16_t on_off  = reg::get(reg::UNIT_ON_OFF);
-    uint16_t mode    = reg::get(reg::WORKING_MODE);
-    uint16_t ec1     = reg::get(reg::ERROR_CODE_1);
-    uint16_t ec2     = reg::get(reg::ERROR_CODE_2);
-    uint16_t ec3     = reg::get(reg::ERROR_CODE_3);
-    uint16_t sts2    = reg::get(reg::STATUS_2);
+    uint16_t status = reg::get(reg::STATUS_BYTE);
+    uint16_t fault  = reg::get(reg::FAULT);
+    uint16_t freq   = reg::get(reg::COMPRESSOR_FREQ);
 
     bool changed = false;
 
-    // Errors take priority — show the first one that changed
-    if (ec1 != s_prev_ec1 || ec2 != s_prev_ec2 || ec3 != s_prev_ec3) {
-        uint16_t any_err = ec1 | ec2 | ec3;
-        if (any_err) {
-            // Find one representative error code for display
-            const char* label = "Error";
-            if (ec1) label = "Sensor Error";
-            if (ec2) label = "System Error";
-            if (ec3) label = "Protection Err";
-            snprintf(s_notif_line1, sizeof(s_notif_line1), "%s", label);
-            snprintf(s_notif_line2, sizeof(s_notif_line2),
-                     "EC: %04X/%04X/%04X", ec1, ec2, ec3);
+    // Faults take priority.
+    if (fault != s_prev_fault) {
+        if (fault) {
+            snprintf(s_notif_line1, sizeof(s_notif_line1), "FAULT");
+            if (fault & reg::FAULT_P01_WATER_FLOW) {
+                snprintf(s_notif_line2, sizeof(s_notif_line2), "P01 Water Flow");
+            } else {
+                snprintf(s_notif_line2, sizeof(s_notif_line2), "reg2128=0x%02X", fault & 0xFF);
+            }
             s_notif_color = COL_RED;
         } else {
-            snprintf(s_notif_line1, sizeof(s_notif_line1), "Errors Cleared");
+            snprintf(s_notif_line1, sizeof(s_notif_line1), "Fault Cleared");
             s_notif_line2[0] = '\0';
             s_notif_color = COL_GREEN;
         }
         changed = true;
     }
 
-    // Unit on/off change
-    if (!changed && on_off != s_prev_on_off) {
-        snprintf(s_notif_line1, sizeof(s_notif_line1),
-                 "Unit %s", on_off ? "ON" : "OFF");
-        s_notif_line2[0] = '\0';
-        s_notif_color = on_off ? COL_GREEN : COL_ORANGE;
-        changed = true;
-    }
-
-    // Working mode change
-    if (!changed && mode != s_prev_mode) {
-        snprintf(s_notif_line1, sizeof(s_notif_line1), "Mode Changed");
-        snprintf(s_notif_line2, sizeof(s_notif_line2), "%s", modeLabel(mode));
-        s_notif_color = COL_CYAN;
-        changed = true;
-    }
-
-    // Status2 bit changes (compressor, pump, heater, etc.)
-    if (!changed && sts2 != s_prev_status2) {
-        uint16_t diff = sts2 ^ s_prev_status2;
-        // Show first interesting bit that changed
+    // Status byte bit changes (compressor, pump).
+    if (!changed && status != s_prev_status) {
+        uint16_t diff = status ^ s_prev_status;
         const char* what = nullptr;
         bool is_on = false;
         struct { uint16_t bit; const char* name; } bits[] = {
-            { reg::STS2_COMPRESSOR,   "Compressor" },
-            { reg::STS2_WATER_PUMP,   "Water Pump" },
-            { reg::STS2_ELEC_HEATER,  "Elec Heater" },
-            { reg::STS2_4WAY_VALVE,   "4-Way Valve" },
-            { reg::STS2_WATER_FLOW,   "Water Flow" },
-            { reg::STS2_HP_SWITCH,    "HP Switch" },
-            { reg::STS2_LP_SWITCH,    "LP Switch" },
+            { reg::STS_COMPRESSOR, "Compressor" },
+            { reg::STS_WATER_PUMP, "Water Pump" },
         };
         for (auto& b : bits) {
             if (diff & b.bit) {
                 what = b.name;
-                is_on = (sts2 & b.bit) != 0;
+                is_on = (status & b.bit) != 0;
                 break;
             }
         }
@@ -373,12 +335,17 @@ static void detectChanges() {
         }
     }
 
-    s_prev_on_off  = on_off;
-    s_prev_mode    = mode;
-    s_prev_ec1     = ec1;
-    s_prev_ec2     = ec2;
-    s_prev_ec3     = ec3;
-    s_prev_status2 = sts2;
+    // Compressor frequency change.
+    if (!changed && freq != s_prev_freq) {
+        snprintf(s_notif_line1, sizeof(s_notif_line1), "Comp Freq");
+        snprintf(s_notif_line2, sizeof(s_notif_line2), "%u Hz", freq);
+        s_notif_color = COL_CYAN;
+        changed = true;
+    }
+
+    s_prev_status = status;
+    s_prev_fault  = fault;
+    s_prev_freq   = freq;
 
     (void)changed;
 }
@@ -402,13 +369,14 @@ static void renderNormalUI() {
     // Separator
     fbHLine(16, 36, LCD_W - 32, COL_DARK_GRAY);
 
-    // Status summary line — mode + on/off
-    uint16_t on_off = reg::get(reg::UNIT_ON_OFF);
-    uint16_t mode   = reg::get(reg::WORKING_MODE);
+    // Status summary line — run state + compressor frequency
+    uint16_t status = reg::get(reg::STATUS_BYTE);
+    uint16_t freq   = reg::get(reg::COMPRESSOR_FREQ);
+    bool running = (status & (reg::STS_COMPRESSOR | reg::STS_WATER_PUMP)) != 0;
     char summary[22];
-    snprintf(summary, sizeof(summary), "%s %s",
-             modeLabel(mode), on_off ? "ON" : "OFF");
-    fbDrawStrCentered(42, summary, on_off ? COL_GREEN : COL_ORANGE,
+    snprintf(summary, sizeof(summary), "%s %uHz",
+             runStateLabel(status), freq);
+    fbDrawStrCentered(42, summary, running ? COL_GREEN : COL_ORANGE,
                       COL_BLACK, 1);
 
     // Notification area (center of screen)

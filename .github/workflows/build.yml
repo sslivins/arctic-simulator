@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'main/**'
+      - 'tests/**'
       - 'CMakeLists.txt'
       - 'sdkconfig.defaults'
       - 'partitions.csv'
@@ -13,6 +14,7 @@ on:
     branches: [main]
     paths:
       - 'main/**'
+      - 'tests/**'
       - 'CMakeLists.txt'
       - 'sdkconfig.defaults'
       - 'partitions.csv'
@@ -23,11 +25,29 @@ permissions:
   contents: read
 
 jobs:
+  native-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -S tests -B tests/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build tests/build
+
+      - name: Test
+        run: ctest --test-dir tests/build --output-on-failure
+
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Extract version from CMakeLists.txt
         id: version
