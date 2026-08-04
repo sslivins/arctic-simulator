@@ -18,10 +18,11 @@ namespace reg {
 static uint16_t s_holding[HOLDING_COUNT] = {};
 static uint16_t s_input[INPUT_COUNT]     = {};
 
-// Static 7-byte prefix that precedes the telemetry-window register data on
-// the real Macon unit (observed constant in every capture). The controller
-// may validate it, so seed it so our frames are byte-identical to the OEM.
-static const uint8_t TELEMETRY_PREFIX[7] = { 0x0a, 0x28, 0x32, 0x05, 0x01, 0x00, 0x0f };
+// Default values for the telemetry-window header registers 2093..2099. These
+// were observed constant on the real Macon unit (byte0 = reg2093 = cooling
+// setpoint). Seeded on every preset so our frames stay byte-identical to the
+// OEM even when the controller hasn't written the setpoint yet.
+static const uint8_t TELEMETRY_HEADER[7] = { 0x0a, 0x28, 0x32, 0x05, 0x01, 0x00, 0x0f };
 
 // ============================================================================
 // Helpers
@@ -63,11 +64,9 @@ esp_err_t set(uint16_t addr, uint16_t value) {
 }
 
 // Project the entire register_map into tuya_state (used after bulk preset
-// loads that write the arrays directly). Also (re)seeds the telemetry prefix.
+// loads that write the arrays directly). The telemetry-header regs (2093..2099)
+// are ordinary input registers now, so they project like everything else.
 static void syncAllToTuya() {
-    for (uint8_t i = 0; i < sizeof(TELEMETRY_PREFIX); ++i) {
-        tuya_state::setByte(/*field_a=*/0, i, TELEMETRY_PREFIX[i]);
-    }
     for (uint16_t a = HOLDING_BASE; a <= HOLDING_END; ++a) {
         tuya_state::projectSet(a, s_holding[a - HOLDING_BASE]);
     }
@@ -105,6 +104,12 @@ static inline uint16_t tempByte(int v) {
 }
 
 static void setCommonDefaults() {
+    // Telemetry-header registers 2093..2099 (byte0 = cooling setpoint). Seed
+    // the OEM-observed constants so the wire stays byte-identical until the
+    // controller writes a new setpoint.
+    for (uint16_t i = 0; i < sizeof(TELEMETRY_HEADER); ++i) {
+        s_input[(COOLING_SETPOINT + i) - INPUT_BASE] = TELEMETRY_HEADER[i];
+    }
     // Mains present even when idle. AC voltage is x10 on the wire (raw 23 =
     // 230 V); DC bus is x10 (raw ~36 = 360 V when running, low when idle).
     s_input[AC_VOLTAGE - INPUT_BASE]        = 23;   // 230 V

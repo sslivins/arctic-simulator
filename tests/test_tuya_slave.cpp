@@ -74,7 +74,7 @@ void test_unknown_window_unreachable_via_seam() {
 
 void test_telemetry_response_byte_exact() {
     reset();
-    // Seed bytes [0..6] (prefix) + bytes [7..49] (reg 2100..2142).
+    // Seed bytes [0..6] (regs 2093..2099) + bytes [7..49] (regs 2100..2142).
     uint8_t payload[50];
     for (size_t i = 0; i < 50; ++i) payload[i] = (uint8_t)(0x10 + i);
     CHECK(tuya_state::writeWindow(WIN_TEL_A, WIN_TEL_B, payload, 50));
@@ -232,12 +232,48 @@ void test_response_buffer_too_small() {
     CHECK(s.responses_sent == 0);
 }
 
+// An fc=0x06 setpoint write ("55 AA F0 06 0000 0001 <°C> <chk>", 10 bytes)
+// carries one inline data byte. The handler must read the full frame, reflect
+// the value into telemetry byte0 (reg2093), and ACK it.
+void test_command_setpoint_write_reflects() {
+    reset();
+
+    const uint8_t new_setpoint = 24;  // °C
+    uint8_t cmd[tuya_codec::MAX_FRAME_LEN];
+    size_t cmd_len = tuya_codec::encode_command(cmd, sizeof(cmd),
+                                                /*field_a=*/0, /*count=*/1,
+                                                &new_setpoint);
+    CHECK(cmd_len == tuya_codec::HDR_LEN + 1 + tuya_codec::CHK_LEN);  // 10
+
+    uint8_t out[tuya_codec::MAX_FRAME_LEN];
+    size_t out_len = 0;
+    size_t consumed = tuya_slave::handleBytesForTest(cmd, cmd_len,
+                                                     out, sizeof(out), &out_len);
+    // Whole command frame consumed (not under-read as the old fixed-9 assumed).
+    CHECK(consumed == cmd_len);
+
+    // Setpoint reflected onto the wire at telemetry byte0 = reg2093.
+    CHECK(tuya_state::getByte(0, 0) == new_setpoint);
+
+    // A 9-byte command ACK was emitted.
+    CHECK(out_len == tuya_codec::MIN_FRAME_LEN);
+    CHECK(out[2] == tuya_codec::DIR_RESPONSE);
+    CHECK(out[3] == tuya_codec::FC_CMD);
+
+    auto s = tuya_slave::getStats();
+    CHECK(s.frames_seen == 1);
+    CHECK(s.commands_seen == 1);
+    CHECK(s.responses_sent == 1);
+    CHECK(s.parse_errors == 0);
+}
+
 }  // namespace
 
 int main() {
     test_unknown_window_unreachable_via_seam();
     test_telemetry_response_byte_exact();
     test_holding_response_byte_exact();
+    test_command_setpoint_write_reflects();
     test_bad_checksum_counts_parse_error();
     test_response_frame_is_ignored();
     test_junk_prefix_is_skipped();

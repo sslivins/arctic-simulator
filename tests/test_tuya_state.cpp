@@ -118,12 +118,17 @@ void test_projection_telemetry_window() {
     tuya_state::resetForTest();
     tuya_state::init();
 
-    // Telemetry: field_a=0, field_b=50, reg_base=2100, prefix=7.
-    // reg 2100 maps to byte 7 of the window.
+    // Telemetry: field_a=0, field_b=50, reg_base=2093, prefix=0.
+    // reg 2093 maps to byte 0; reg 2100 maps to byte 7 of the window.
+    CHECK(tuya_state::projectKnows(2093));
     CHECK(tuya_state::projectKnows(2100));
-    CHECK(tuya_state::projectKnows(2142));   // 2100 + (50 - 7) - 1 = 2142
-    CHECK(!tuya_state::projectKnows(2099));
+    CHECK(tuya_state::projectKnows(2142));   // 2093 + 50 - 1 = 2142
+    CHECK(!tuya_state::projectKnows(2092));
     CHECK(!tuya_state::projectKnows(2143));
+
+    CHECK(tuya_state::projectSet(2093, 0x0A));
+    CHECK(tuya_state::projectGet(2093) == 0x0A);
+    CHECK(tuya_state::getByte(0, 0) == 0x0A);
 
     CHECK(tuya_state::projectSet(2100, 0x37));
     CHECK(tuya_state::projectGet(2100) == 0x37);
@@ -131,7 +136,7 @@ void test_projection_telemetry_window() {
 
     CHECK(tuya_state::projectSet(2110, 20));
     CHECK(tuya_state::projectGet(2110) == 20);
-    CHECK(tuya_state::getByte(0, 17) == 20);  // 7 + (2110 - 2100)
+    CHECK(tuya_state::getByte(0, 17) == 20);  // 2110 - 2093
 }
 
 void test_projection_holding_window() {
