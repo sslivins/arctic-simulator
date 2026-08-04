@@ -115,23 +115,48 @@ Fields:
 
 ## Register Map
 
-See the [Arctic Modbus Protocol](https://github.com/sslivins/arctic-controller/blob/main/docs/ARCTIC-MODBUS-PROTOCOL.md) for the complete register map.
+The register semantics below were reverse-engineered from live captures of the
+real Macon controller. `main/register_map.h` is the authoritative, in-repo
+source of truth (named constants + per-bit notes).
+
+The unit exposes two register windows on the Tuya/Macon wire:
+
+- **Holding** window (wire `addr=50`): regs **2000–2057**.
+- **Telemetry** window (wire `addr=0`): regs **2093–2142**. Byte 0 of this
+  window is **reg2093 = the cooling setpoint** (formerly mistaken for an opaque
+  7-byte prefix; corrected in arctic-macon 311a291).
 
 ### Key Registers
 
-| Address | Description | R/W |
-|---------|-------------|-----|
-| 2000 | Unit ON/OFF | R/W |
-| 2001 | Working Mode (0=Cool, 1=FloorHeat, 2=FanCoil, 5=HotWater, 6=Auto) | R/W |
-| 2002–2004 | Temperature Setpoints (cool/heat/hot water) | R/W |
-| 2100 | Water Tank Temperature | R |
-| 2102–2103 | Outlet / Inlet Water Temperature | R |
-| 2110 | Outdoor Ambient Temperature | R |
-| 2118 | Compressor Frequency (Hz) | R |
-| 2119 | Fan Speed (RPM) | R |
-| 2135 | System Status (bit field) | R |
-| 2137 | Error Code 2 (bit field) | R |
-| 2138 | Error Code 3 / Protection (bit field) | R |
+| Address | Window | Description | R/W |
+|---------|--------|-------------|-----|
+| 2000 | Holding | A4 · AC input current (A) | R |
+| 2001 | Holding | A7 · DC bus voltage (×10 = V) | R |
+| 2003 | Holding | A10 · DC fan motor speed | R |
+| 2007 | Holding | Operating-state / fault bitfield (bit5 `0x20` = hot-water running) | R/W |
+| 2008 | Holding | o1 · Water tank temp (°C) | R |
+| 2012 | Holding | Hot water setpoint (°C) | R/W |
+| 2093 | Telemetry | Cooling setpoint (whole °C) | R/W |
+| 2101 | Telemetry | A13 · AC input voltage (×10 = V) | R |
+| 2104 | Telemetry | A5 · Main EEV position (steps) | R |
+| 2113 | Telemetry | A8 · IPM module temp (°C) | R |
+| 2114 | Telemetry | A9 · Real-time power (×100 = W) | R |
+| 2125–2128 | Telemetry | Fault bitfields (sensor/EE, comm/compressor, electrical, refrigerant/P-codes) | R |
+| 2129 | Telemetry | Icon bitfield #2 (defrost, fan) | R |
+| 2130 | Telemetry | Icon bitfield #1 (compressor, pump, heating) | R |
+| 2132 | Telemetry | o3 · Outlet (supply) water temp (°C) | R |
+| 2133 | Telemetry | o2 · Inlet (return) water temp (°C) | R |
+| 2134 | Telemetry | o4 · Outdoor ambient temp (°C) | R |
+| 2135 | Telemetry | A6 · Cool coil temp (°C) | R |
+| 2136 | Telemetry | A3 · Suction temp (°C) | R |
+| 2137 | Telemetry | A2 · Coil temp (°C) | R |
+| 2138 | Telemetry | A1 · Discharge temp (°C) | R |
+| 2141 | Telemetry | A14 · Compressor frequency (Hz) | R |
+
+> The R/W column reflects the real unit's protocol. In the **simulator** every
+> register is settable via `PUT /api/registers` / `POST /api/registers/bulk`.
+> The controller writes the setpoint with an fc=0x06 command (`addr=0`), which
+> the simulator reflects back into telemetry reg2093.
 
 ## Project Structure
 
