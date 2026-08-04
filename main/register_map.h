@@ -33,8 +33,8 @@ constexpr uint16_t HOLDING_BASE  = 2000;
 constexpr uint16_t HOLDING_COUNT = 58;   // 2000-2057
 constexpr uint16_t HOLDING_END   = HOLDING_BASE + HOLDING_COUNT - 1;
 
-constexpr uint16_t INPUT_BASE    = 2100;
-constexpr uint16_t INPUT_COUNT   = 43;   // 2100-2142 (telemetry window reaches 2142)
+constexpr uint16_t INPUT_BASE    = 2093;
+constexpr uint16_t INPUT_COUNT   = 50;   // 2093-2142 (full telemetry window; byte0 = reg2093)
 constexpr uint16_t INPUT_END     = INPUT_BASE + INPUT_COUNT - 1;
 
 // ============================================================================
@@ -48,8 +48,15 @@ constexpr uint16_t WATER_TANK_TEMP       = 2008;  // o1  water tank temp (°C)
 constexpr uint16_t HOT_WATER_SETPOINT    = 2012;  // hot water setpoint (°C)
 
 // ============================================================================
-// "Telemetry" window (wire addr=0, base 2100 after a 7-byte prefix)
+// "Telemetry" window (wire addr=0, base 2093; byte0 = reg2093)
+// ----------------------------------------------------------------------------
+// Regs 2093..2099 were formerly treated as an opaque 7-byte "prefix"; the
+// arctic-macon codec (311a291) resolved them to real registers. reg2093 is the
+// cooling setpoint (confirmed live: flips the instant the controller dial moves
+// 12->24 C). 2094..2099 are still mostly unconfirmed but seeded to the values
+// observed constant on the OEM unit so wire output stays byte-identical.
 // ============================================================================
+constexpr uint16_t COOLING_SETPOINT      = 2093;  // cooling setpoint (whole °C)
 constexpr uint16_t AC_VOLTAGE            = 2101;  // A13 AC input voltage (x10 = V)
 constexpr uint16_t MAIN_EEV              = 2104;  // A5  main elec. expansion valve (steps)
 constexpr uint16_t IPM_TEMP              = 2113;  // A8  IPM module temp (°C)
