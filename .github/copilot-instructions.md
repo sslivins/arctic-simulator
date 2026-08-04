@@ -51,7 +51,7 @@ stand-in for the real heat pump during development and integration testing of th
 | Path | Purpose |
 |------|---------|
 | `main/` | All application source code |
-| `main/register_map.h/cpp` | Register storage (holding 2000–2057, input 2100–2138), presets |
+| `main/register_map.h/cpp` | Register storage (holding 2000–2057, telemetry/input 2093–2142), presets |
 | `main/tuya_codec/` | Tuya MCU frame codec (parse, encode, checksum) |
 | `main/tuya_state.h/cpp` | Per-window byte store with mutex-guarded snapshots |
 | `main/tuya_slave.h/cpp` | Tuya MCU wire-protocol slave over RS-485 |
@@ -80,7 +80,7 @@ stand-in for the real heat pump during development and integration testing of th
   `%lld` for `int64_t`. Always cast to `(long)` and use `%ld`, or `(unsigned long)`
   and use `%lu`.
 - Namespaces: `reg::`, `tuya_slave::`, `api::`, `playback::`, `wifi::`
-- Register addresses use the protocol's native numbering (2000–2138), not zero-based
+- Register addresses use the protocol's native numbering (2000–2142), not zero-based
   offsets. Conversion to array indices is internal to `register_map.cpp`.
 
 ### REST API
