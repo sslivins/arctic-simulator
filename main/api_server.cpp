@@ -408,12 +408,12 @@ static esp_err_t handlePreset(httpd_req_t* req) {
         cJSON_Delete(json);
         return sendError(req, 400, "Unknown preset. Valid: idle, heating, cooling, hot_water, defrost, fault_p01");
     }
-    cJSON_Delete(json);
 
     reg::loadPreset(preset);
 
     cJSON* resp = cJSON_CreateObject();
     cJSON_AddStringToObject(resp, "preset", n);
+    cJSON_Delete(json);   // after the echo: `n` points into `json`
     cJSON_AddStringToObject(resp, "status", "loaded");
     return sendJson(req, resp);
 }
