@@ -54,6 +54,7 @@ idf_component_register(
         "status_led.cpp"
         "tuya_state.cpp"
         "tuya_slave.cpp"
+        "semantic_api.cpp"
     INCLUDE_DIRS
         "."
     EMBED_FILES

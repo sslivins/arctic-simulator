@@ -60,15 +60,34 @@ GET /api/status
 
 Returns simulator status, Modbus statistics, and playback state.
 
-### Registers
+### Semantic state (preferred)
+
+Every field, flag, enum and fault is named by the **arctic-macon** library
+(`components/arctic-macon`, `macon_fields.h` / `macon_faults.h`) -- the same
+library the controller decodes with. The simulator holds no register map of
+its own, so the two can't drift apart. `GET /api/status` reports the library's
+`macon.api_version` plus `layout_fingerprint` / `catalog_fingerprint`; a
+consumer should refuse to run if they differ from its own.
 
 ```
-GET  /api/registers              # All register values
-GET  /api/registers?addr=2100    # Single register
-PUT  /api/registers?addr=2110    # Set single register
-     Body: { "value": 350 }
-POST /api/registers/bulk         # Set multiple registers
-     Body: { "registers": { "2100": 350, "2110": 200 } }
+GET   /api/fields                # Catalog: every named field (kind, unit, range, step, enum keys)
+GET   /api/state                 # Current value of every named field, decoded operation, active faults
+PATCH /api/state                 # Atomic multi-field update (all-or-nothing, 400 with reason on reject)
+      Body: { "outlet_water_temp": 42, "pump_on": true, "working_mode": "floor_heating" }
+GET   /api/heatpump              # Compact summary (decoded by the library)
+```
+
+Numbers are semantic units (deg C, Hz, RPM, W, V); flags accept `true`/`false`
+or `0`/`1`; enums take the string keys listed by `/api/fields`.
+
+### Faults
+
+```
+GET  /api/faults/catalog         # Every OEM code: id, code, label, severity, resolution, sites[]
+GET  /api/faults                 # Active faults (code, label, severity, site)
+POST /api/faults                 # { "code": "P01", "active": true }  -- every site of the code
+                                 # { "site": 12,    "active": true }  -- one specific bit
+POST /api/faults/clear           # Clear every fault (keeps the unit-enabled flag)
 ```
 
 ### Presets
@@ -78,14 +97,40 @@ POST /api/preset
 Body: { "name": "heating" }
 ```
 
-Available presets: `idle`, `heating`, `cooling`, `hot_water`, `defrost`, `error_e01`, `error_p01`
+Available presets: `idle`, `heating`, `cooling`, `hot_water`, `defrost`, `fault_p01`.
+Each preset is a list of named fields applied atomically on top of a common
+idle baseline, so nothing leaks from the previous preset.
 
-### Error Control
+### Bench lease (advisory)
 
 ```
-POST /api/errors/clear           # Clear all error flags
+GET    /api/lease                # Current holder, if any
+POST   /api/lease                # { "owner": "ci-run-123", "ttl_s": 900 }  -- 409 if held by someone else
+DELETE /api/lease                # { "owner": "ci-run-123" } or { "force": true }
+```
+
+### Controller commands
+
+```
+GET  /api/commands               # Recent fc=0x06 writes received from the controller
+                                 # (wire_addr, data bytes, applied, raw frame)
+```
+
+### Raw registers (debug only)
+
+```
+GET  /api/registers              # All served register values, grouped by window
+GET  /api/registers?addr=2100    # Single register
+PUT  /api/registers?addr=2110    # Set single register (low byte stored)
+     Body: { "value": 35 }
+POST /api/registers/bulk         # Set multiple registers
+     Body: { "registers": { "2100": 35, "2110": 20 } }
+POST /api/errors/clear           # Legacy alias of /api/faults/clear
 POST /api/reboot                 # Reboot the device
 ```
+
+Prefer the semantic endpoints; raw register access bypasses the library's
+meaning and exists only for protocol debugging.
 
 ### Playback
 
@@ -115,48 +160,21 @@ Fields:
 
 ## Register Map
 
-The register semantics below were reverse-engineered from live captures of the
-real Macon controller. `main/register_map.h` is the authoritative, in-repo
-source of truth (named constants + per-bit notes).
+The simulator no longer carries a register map. Every address, bit and scaling
+is defined once in the **arctic-macon** library -- see
+`components/arctic-macon/docs/REGISTERS.md` and `include/macon_fields.h` --
+and shared with the controller and sniffer.
 
 The unit exposes two register windows on the Tuya/Macon wire:
 
-- **Holding** window (wire `addr=50`): regs **2000–2057**.
-- **Telemetry** window (wire `addr=0`): regs **2093–2142**. Byte 0 of this
-  window is **reg2093 = the cooling setpoint** (formerly mistaken for an opaque
-  7-byte prefix; corrected in arctic-macon 311a291).
+- **Holding** window (wire `addr=50`): regs **2000-2057**.
+- **Telemetry** window (wire `addr=0`): regs **2093-2142**.
 
-### Key Registers
-
-| Address | Window | Description | R/W |
-|---------|--------|-------------|-----|
-| 2000 | Holding | A4 · AC input current (A) | R |
-| 2001 | Holding | A7 · DC bus voltage (×10 = V) | R |
-| 2003 | Holding | A10 · DC fan motor speed | R |
-| 2007 | Holding | Operating-state / fault bitfield (bit5 `0x20` = hot-water running) | R/W |
-| 2008 | Holding | o1 · Water tank temp (°C) | R |
-| 2012 | Holding | Hot water setpoint (°C) | R/W |
-| 2093 | Telemetry | Cooling setpoint (whole °C) | R/W |
-| 2101 | Telemetry | A13 · AC input voltage (×10 = V) | R |
-| 2104 | Telemetry | A5 · Main EEV position (steps) | R |
-| 2113 | Telemetry | A8 · IPM module temp (°C) | R |
-| 2114 | Telemetry | A9 · Real-time power (×100 = W) | R |
-| 2125–2128 | Telemetry | Fault bitfields (sensor/EE, comm/compressor, electrical, refrigerant/P-codes) | R |
-| 2129 | Telemetry | Icon bitfield #2 (defrost, fan) | R |
-| 2130 | Telemetry | Icon bitfield #1 (compressor, pump, heating) | R |
-| 2132 | Telemetry | o3 · Outlet (supply) water temp (°C) | R |
-| 2133 | Telemetry | o2 · Inlet (return) water temp (°C) | R |
-| 2134 | Telemetry | o4 · Outdoor ambient temp (°C) | R |
-| 2135 | Telemetry | A6 · Cool coil temp (°C) | R |
-| 2136 | Telemetry | A3 · Suction temp (°C) | R |
-| 2137 | Telemetry | A2 · Coil temp (°C) | R |
-| 2138 | Telemetry | A1 · Discharge temp (°C) | R |
-| 2141 | Telemetry | A14 · Compressor frequency (Hz) | R |
-
-> The R/W column reflects the real unit's protocol. In the **simulator** every
-> register is settable via `PUT /api/registers` / `POST /api/registers/bulk`.
-> The controller writes the setpoint with an fc=0x06 command (`addr=0`), which
-> the simulator reflects back into telemetry reg2093.
+At boot the store is seeded with payloads captured from a real Macon mainboard
+(2026-05-03), so bytes the library doesn't name still match the real unit, and
+then the `idle` preset is applied. Controller fc=0x06 writes are applied with
+the library's `MaconImage::apply_write`, exactly as the real unit reflects
+them.
 
 ## Project Structure
 

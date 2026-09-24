@@ -154,26 +154,20 @@ size_t handleBytesForTest(const uint8_t *in, size_t in_len,
             // command as accepted.
             s_commands_seen.fetch_add(1, std::memory_order_relaxed);
             uint32_t idx = s_cmd_count.fetch_add(1, std::memory_order_relaxed);
-            s_cmd_ring[idx % COMMAND_RING_SZ] = { field_a, field_b };
-            // A write carries `count` inline data bytes starting at wire addr
-            // `field_a` (e.g. cooling setpoint at 0x0000 = reg2093, working
-            // mode at 0x0003 = reg2096). Reflect them into whichever known
-            // window covers that address so a subsequent read shows the new
-            // value, just like the real unit does.
-            if (pf.payload && pf.payload_len > 0) {
-                for (size_t w = 0; w < tuya_codec::KNOWN_WINDOWS_COUNT; ++w) {
-                    const auto &win = tuya_codec::KNOWN_WINDOWS[w];
-                    if (field_a < win.field_a ||
-                        field_a >= win.field_a + win.field_b) {
-                        continue;
-                    }
-                    const size_t base = win.prefix_len + (field_a - win.field_a);
-                    for (size_t i = 0; i < pf.payload_len; ++i) {
-                        tuya_state::setByte(win.field_a, base + i, pf.payload[i]);
-                    }
-                    break;
-                }
+            CommandRec rec{};
+            rec.field_a = field_a;
+            rec.field_b = field_b;
+            if (pf.payload) {
+                rec.data_len = static_cast<uint8_t>(
+                    pf.payload_len < sizeof(rec.data) ? pf.payload_len : sizeof(rec.data));
+                std::memcpy(rec.data, pf.payload, rec.data_len);
             }
+            // A write carries `count` inline data bytes starting at wire addr
+            // `field_a`. The library reflects them into the image exactly as
+            // the real unit does, so the next read shows the new value.
+            rec.applied = pf.payload && pf.payload_len > 0 &&
+                          tuya_state::applyWrite(field_a, pf.payload, pf.payload_len);
+            s_cmd_ring[idx % COMMAND_RING_SZ] = rec;
             size_t enc = tuya_codec::encode_command_ack(out, out_capacity,
                                                         field_a, field_b);
             if (enc > 0) {
