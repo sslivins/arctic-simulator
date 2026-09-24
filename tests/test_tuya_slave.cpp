@@ -267,6 +267,26 @@ void test_command_setpoint_write_reflects() {
     CHECK(s.parse_errors == 0);
 }
 
+// A working-mode write lands at wire addr 0x0003 (telemetry byte3 = reg2096),
+// not byte0: the handler must reflect it at its offset within the window.
+void test_command_mode_write_reflects_at_offset() {
+    reset();
+
+    const uint8_t hot_water = 5;
+    uint8_t cmd[tuya_codec::MAX_FRAME_LEN];
+    size_t cmd_len = tuya_codec::encode_command(cmd, sizeof(cmd),
+                                                /*field_a=*/3, /*count=*/1,
+                                                &hot_water);
+    uint8_t out[tuya_codec::MAX_FRAME_LEN];
+    size_t out_len = 0;
+    size_t consumed = tuya_slave::handleBytesForTest(cmd, cmd_len,
+                                                     out, sizeof(out), &out_len);
+    CHECK(consumed == cmd_len);
+    CHECK(tuya_state::getByte(0, 3) == hot_water);
+    CHECK(tuya_state::getByte(0, 0) == 0);   // byte0 untouched
+    CHECK(out_len == tuya_codec::MIN_FRAME_LEN);
+}
+
 }  // namespace
 
 int main() {
@@ -274,6 +294,7 @@ int main() {
     test_telemetry_response_byte_exact();
     test_holding_response_byte_exact();
     test_command_setpoint_write_reflects();
+    test_command_mode_write_reflects_at_offset();
     test_bad_checksum_counts_parse_error();
     test_response_frame_is_ignored();
     test_junk_prefix_is_skipped();

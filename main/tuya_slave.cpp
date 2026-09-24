@@ -155,13 +155,23 @@ size_t handleBytesForTest(const uint8_t *in, size_t in_len,
             s_commands_seen.fetch_add(1, std::memory_order_relaxed);
             uint32_t idx = s_cmd_count.fetch_add(1, std::memory_order_relaxed);
             s_cmd_ring[idx % COMMAND_RING_SZ] = { field_a, field_b };
-            // A write to the telemetry window (addr=0) carries `count` inline
-            // data bytes (e.g. the cooling setpoint at byte0 = reg2093). Reflect
-            // them onto the wire so a subsequent read shows the new value, just
-            // like the real unit does.
-            if (pf.payload && pf.payload_len > 0 && field_a == 0) {
-                for (size_t i = 0; i < pf.payload_len; ++i) {
-                    tuya_state::setByte(/*field_a=*/0, (uint16_t)i, pf.payload[i]);
+            // A write carries `count` inline data bytes starting at wire addr
+            // `field_a` (e.g. cooling setpoint at 0x0000 = reg2093, working
+            // mode at 0x0003 = reg2096). Reflect them into whichever known
+            // window covers that address so a subsequent read shows the new
+            // value, just like the real unit does.
+            if (pf.payload && pf.payload_len > 0) {
+                for (size_t w = 0; w < tuya_codec::KNOWN_WINDOWS_COUNT; ++w) {
+                    const auto &win = tuya_codec::KNOWN_WINDOWS[w];
+                    if (field_a < win.field_a ||
+                        field_a >= win.field_a + win.field_b) {
+                        continue;
+                    }
+                    const size_t base = win.prefix_len + (field_a - win.field_a);
+                    for (size_t i = 0; i < pf.payload_len; ++i) {
+                        tuya_state::setByte(win.field_a, base + i, pf.payload[i]);
+                    }
+                    break;
                 }
             }
             size_t enc = tuya_codec::encode_command_ack(out, out_capacity,
