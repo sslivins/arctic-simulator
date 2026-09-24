@@ -1,15 +1,13 @@
 // ---------------------------------------------------------------------------
-// tuya_state — implementation
+// tuya_state — implementation (one mutex-guarded arctic::MaconImage).
 //
-// Builds on both target (ESP-IDF / FreeRTOS) and host (native tests). The
-// mutex picks the platform-appropriate primitive via a small Lock helper
-// at the top of this file.
+// Builds on both target (ESP-IDF / FreeRTOS) and host (native tests).
 // ---------------------------------------------------------------------------
 
 #include "tuya_state.h"
 #include "tuya_codec.h"
 
-#include <cstring>
+#include <atomic>
 
 #if defined(ESP_PLATFORM)
   #include "freertos/FreeRTOS.h"
@@ -21,8 +19,6 @@
 namespace tuya_state {
 
 namespace {
-
-// ---------------- Platform-specific mutex --------------------------------
 
 #if defined(ESP_PLATFORM)
 class Mutex {
@@ -54,55 +50,35 @@ private:
     Mutex &m_;
 };
 
-// ---------------- Storage ------------------------------------------------
-
-struct Slot {
-    uint16_t field_a   = 0;
-    uint16_t field_b   = 0;
-    uint16_t reg_base  = 0;
-    uint8_t  prefix    = 0;
-    uint8_t  bytes[MAX_WINDOW_BYTES] = {};
-    bool     in_use    = false;
-};
-
-Slot   s_slots[MAX_WINDOWS];
-size_t s_slot_count = 0;
-bool   s_initialized = false;
-
-// Static singleton — function-local-static guarantees first-call init order
-// across translation units without resorting to a global ctor.
 Mutex &mutex() {
     static Mutex m;
     return m;
 }
 
-// Find the slot index for a window. Caller must hold the mutex.
-int findSlotLocked(uint16_t field_a, uint16_t field_b) {
-    for (size_t i = 0; i < s_slot_count; ++i) {
-        if (s_slots[i].in_use &&
-            s_slots[i].field_a == field_a &&
-            s_slots[i].field_b == field_b) {
-            return static_cast<int>(i);
-        }
+arctic::MaconImage   s_image;
+bool                 s_initialized = false;
+std::atomic<uint32_t> s_generation{0};
+
+void bump() { s_generation.fetch_add(1, std::memory_order_relaxed); }
+
+const tuya_codec::RegWindow *windowByA(uint16_t field_a) {
+    for (size_t i = 0; i < tuya_codec::KNOWN_WINDOWS_COUNT; ++i) {
+        if (tuya_codec::KNOWN_WINDOWS[i].field_a == field_a) return &tuya_codec::KNOWN_WINDOWS[i];
     }
-    return -1;
+    return nullptr;
 }
 
-// Resolve reg_addr -> (slot index, byte offset) by walking the registered
-// windows. Returns false if no window contains this register.
-// Caller must hold the mutex.
-bool resolveRegLocked(uint16_t reg_addr, int &slot_out, size_t &offset_out) {
-    for (size_t i = 0; i < s_slot_count; ++i) {
-        const Slot &s = s_slots[i];
-        if (!s.in_use) continue;
-        // Data-region length = field_b - prefix
-        if (s.field_b <= s.prefix) continue;
-        const uint16_t data_len = static_cast<uint16_t>(s.field_b - s.prefix);
-        if (reg_addr >= s.reg_base && reg_addr < s.reg_base + data_len) {
-            slot_out   = static_cast<int>(i);
-            offset_out = static_cast<size_t>(s.prefix + (reg_addr - s.reg_base));
-            return true;
-        }
+// Register served at payload `offset` of `win`, or 0 for a prefix byte.
+uint16_t regAt(const tuya_codec::RegWindow &win, size_t offset) {
+    if (offset < win.prefix_len) return 0;
+    return static_cast<uint16_t>(win.reg_base + (offset - win.prefix_len));
+}
+
+bool servedLocked(uint16_t reg) {
+    for (size_t i = 0; i < tuya_codec::KNOWN_WINDOWS_COUNT; ++i) {
+        const auto &w = tuya_codec::KNOWN_WINDOWS[i];
+        const uint16_t n = static_cast<uint16_t>(w.field_b - w.prefix_len);
+        if (reg >= w.reg_base && reg < w.reg_base + n) return true;
     }
     return false;
 }
@@ -114,30 +90,17 @@ bool resolveRegLocked(uint16_t reg_addr, int &slot_out, size_t &offset_out) {
 void init() {
     Guard g(mutex());
     if (s_initialized) return;
-
-    s_slot_count = 0;
-    const size_t n = tuya_codec::KNOWN_WINDOWS_COUNT;
-    for (size_t i = 0; i < n && s_slot_count < MAX_WINDOWS; ++i) {
-        const auto &w = tuya_codec::KNOWN_WINDOWS[i];
-        if (w.field_b > MAX_WINDOW_BYTES) continue;  // skip pathologically large
-        Slot &slot = s_slots[s_slot_count++];
-        slot.field_a  = w.field_a;
-        slot.field_b  = w.field_b;
-        slot.reg_base = w.reg_base;
-        slot.prefix   = w.prefix_len;
-        std::memset(slot.bytes, 0, sizeof(slot.bytes));
-        slot.in_use   = true;
-    }
+    s_image.clear();
+    s_image.fill_baseline();
     s_initialized = true;
+    bump();
 }
 
 void resetForTest() {
     Guard g(mutex());
-    for (size_t i = 0; i < MAX_WINDOWS; ++i) {
-        s_slots[i] = Slot{};
-    }
-    s_slot_count  = 0;
+    s_image.clear();
     s_initialized = false;
+    bump();
 }
 
 bool isInitialized() {
@@ -147,81 +110,91 @@ bool isInitialized() {
 
 size_t windowCount() {
     Guard g(mutex());
-    return s_slot_count;
+    return s_initialized ? tuya_codec::KNOWN_WINDOWS_COUNT : 0;
 }
 
-// ---------------- Read ---------------------------------------------------
+// ---------------- Wire ---------------------------------------------------
 
 bool snapshot(uint16_t field_a, uint16_t field_b,
               uint8_t *out_buf, size_t out_buf_capacity) {
-    if (!out_buf || out_buf_capacity < field_b) return false;
     Guard g(mutex());
-    const int idx = findSlotLocked(field_a, field_b);
-    if (idx < 0) return false;
-    std::memcpy(out_buf, s_slots[idx].bytes, field_b);
-    return true;
+    if (!s_initialized) return false;
+    return s_image.read_window(field_a, field_b, out_buf, out_buf_capacity) == field_b &&
+           field_b > 0;
 }
 
 uint8_t getByte(uint16_t field_a, size_t offset) {
     Guard g(mutex());
-    for (size_t i = 0; i < s_slot_count; ++i) {
-        const Slot &s = s_slots[i];
-        if (!s.in_use || s.field_a != field_a) continue;
-        if (offset >= s.field_b) return 0;
-        return s.bytes[offset];
-    }
-    return 0;
+    const tuya_codec::RegWindow *w = windowByA(field_a);
+    if (!s_initialized || !w || offset >= w->field_b) return 0;
+    uint16_t v = 0;
+    const uint16_t reg = regAt(*w, offset);
+    return (reg && s_image.get_register(reg, &v)) ? static_cast<uint8_t>(v) : 0;
 }
-
-// ---------------- Write --------------------------------------------------
 
 bool writeWindow(uint16_t field_a, uint16_t field_b,
                  const uint8_t *payload, size_t payload_len) {
-    if (!payload) return false;
-    if (payload_len != field_b) return false;
+    if (!payload || payload_len != field_b) return false;
     Guard g(mutex());
-    const int idx = findSlotLocked(field_a, field_b);
-    if (idx < 0) return false;
-    std::memcpy(s_slots[idx].bytes, payload, field_b);
+    const tuya_codec::RegWindow *w = tuya_codec::find_window(field_a, field_b);
+    if (!s_initialized || !w) return false;
+    s_image.ingest_bytes(w->reg_base, payload + w->prefix_len, field_b - w->prefix_len);
+    bump();
     return true;
 }
 
 bool setByte(uint16_t field_a, size_t offset, uint8_t value) {
     Guard g(mutex());
-    for (size_t i = 0; i < s_slot_count; ++i) {
-        Slot &s = s_slots[i];
-        if (!s.in_use || s.field_a != field_a) continue;
-        if (offset >= s.field_b) return false;
-        s.bytes[offset] = value;
-        return true;
-    }
-    return false;
+    const tuya_codec::RegWindow *w = windowByA(field_a);
+    if (!s_initialized || !w || offset >= w->field_b) return false;
+    const uint16_t reg = regAt(*w, offset);
+    if (reg == 0) return true;   // static prefix byte: nothing to store
+    const bool ok = s_image.set_register(reg, value);
+    if (ok) bump();
+    return ok;
 }
 
-// ---------------- Projection ---------------------------------------------
+bool applyWrite(uint16_t wire_addr, const uint8_t *data, size_t len) {
+    Guard g(mutex());
+    if (!s_initialized) return false;
+    const bool ok = s_image.apply_write(wire_addr, data, len);
+    if (ok) bump();
+    return ok;
+}
+
+// ---------------- Raw projection -----------------------------------------
 
 uint16_t projectGet(uint16_t reg_addr) {
     Guard g(mutex());
-    int    slot_idx = -1;
-    size_t offset   = 0;
-    if (!resolveRegLocked(reg_addr, slot_idx, offset)) return 0;
-    return static_cast<uint16_t>(s_slots[slot_idx].bytes[offset]);
+    uint16_t v = 0;
+    if (!servedLocked(reg_addr) || !s_image.get_register(reg_addr, &v)) return 0;
+    return v;
 }
 
 bool projectSet(uint16_t reg_addr, uint16_t value) {
     Guard g(mutex());
-    int    slot_idx = -1;
-    size_t offset   = 0;
-    if (!resolveRegLocked(reg_addr, slot_idx, offset)) return false;
-    s_slots[slot_idx].bytes[offset] = static_cast<uint8_t>(value & 0xFF);
-    return true;
+    if (!servedLocked(reg_addr)) return false;
+    const bool ok = s_image.set_register(reg_addr, static_cast<uint16_t>(value & 0xFF));
+    if (ok) bump();
+    return ok;
 }
 
 bool projectKnows(uint16_t reg_addr) {
     Guard g(mutex());
-    int    slot_idx = -1;
-    size_t offset   = 0;
-    return resolveRegLocked(reg_addr, slot_idx, offset);
+    return servedLocked(reg_addr);
 }
+
+// ---------------- Semantic -----------------------------------------------
+
+Access::Access()  { mutex().lock(); }
+Access::~Access() { bump(); mutex().unlock(); }
+arctic::MaconImage &Access::image() { return s_image; }
+
+void decode(arctic::MaconState *out) {
+    Guard g(mutex());
+    s_image.decode(out);
+}
+
+uint32_t generation() { return s_generation.load(std::memory_order_relaxed); }
 
 }  // namespace tuya_state

@@ -1,227 +1,204 @@
 /*
- * Arctic (Macon) Heat Pump Register Map — Implementation
+ * Simulator presets + raw register debug access — implementation.
  *
- * The Tuya slave serves bytes out of tuya_state, so every mutation here is
- * mirrored into tuya_state (projectSet) to reach the wire. The uint16_t
- * arrays remain the convenient source for the REST API / display reads.
+ * Presets are lists of NAMED fields applied through the arctic-macon library
+ * (macon_field_set), over a baseline that is the real OEM mainboard's wire
+ * image. No register numbers live here.
  */
 #include "register_map.h"
 #include "tuya_state.h"
-#include "esp_log.h"
+#include "tuya_codec.h"
+#include "macon_fields.h"
+#if defined(ESP_PLATFORM)
+  #include "esp_log.h"
+#else
+  #define ESP_LOGI(tag, ...) ((void)(tag))
+  #define ESP_LOGE(tag, ...) ((void)(tag))
+#endif
 #include <string.h>
+
+using namespace arctic;
 
 static const char* TAG = "reg";
 
 namespace reg {
 
-// Internal storage
-static uint16_t s_holding[HOLDING_COUNT] = {};
-static uint16_t s_input[INPUT_COUNT]     = {};
+namespace {
 
-// Default values for the telemetry-window header registers 2093..2099. These
-// were observed constant on the real Macon unit (byte0 = reg2093 = cooling
-// setpoint). Seeded on every preset so our frames stay byte-identical to the
-// OEM even when the controller hasn't written the setpoint yet.
-static const uint8_t TELEMETRY_HEADER[7] = { 0x0a, 0x28, 0x32, 0x05, 0x01, 0x00, 0x0f };
+// OEM baseline: payloads served by a real Macon mainboard (idle, hot-water
+// mode), verbatim from tests/data/capture_raw.jsonl (2026-05-03). Seeding
+// from these keeps every byte the library doesn't name (installer Cn
+// parameters, unmapped telemetry) identical to the real unit.
+const uint8_t kOemHolding[58] = {
+    0x00,0x20,0x00,0x00,0x00,0x00,0x00,0x20,0x14,0x23,0x2d,0x2d,0x32,0xfa,0x03,0x00,
+    0x00,0x00,0x00,0x00,0x04,0x2d,0x00,0x1c,0x12,0x05,0x05,0x00,0x00,0xf6,0x3c,0xf9,
+    0x0a,0x2d,0x05,0x0c,0x5f,0x0f,0xe2,0x32,0xff,0x0a,0x0a,0x05,0x02,0x05,0xff,0x00,
+    0x00,0x00,0x00,0x00,0x14,0xf1,0x00,0x00,0x00,0x00,
+};
+const uint8_t kOemTelemetry[50] = {
+    0x0a,0x28,0x32,0x05,0x01,0x00,0x0f,0x1e,0x17,0x06,0x09,0x11,0x23,0x00,0x20,0x23,
+    0x1e,0x28,0x00,0x00,0x0c,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x60,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x0a,0x0a,0x0f,0x0b,0x0b,0x0f,0x0e,0x00,
+    0x13,0x00,
+};
 
-// ============================================================================
-// Helpers
-// ============================================================================
+struct FieldValue { const char *name; int32_t value; };
 
-bool isHolding(uint16_t addr) {
-    return addr >= HOLDING_BASE && addr <= HOLDING_END;
+int s_rejects = 0;
+
+constexpr int32_t WM_COOLING   = static_cast<int32_t>(MaconWorkingMode::Cooling);
+constexpr int32_t WM_FLOOR     = static_cast<int32_t>(MaconWorkingMode::FloorHeating);
+constexpr int32_t WM_HOT_WATER = static_cast<int32_t>(MaconWorkingMode::HotWater);
+constexpr int32_t DIR_HEATING  = static_cast<int32_t>(MaconMode::Heating);
+constexpr int32_t DIR_COOLING  = static_cast<int32_t>(MaconMode::Cooling);
+
+// Every preset starts from this fully-specified "idle, powered, no faults" state
+// (unit enabled, matching the OEM idle capture where reg2007 = 0x20)
+// so no value leaks from the previous preset or a controller write.
+const FieldValue kCommon[] = {
+    {"unit_on", 1}, {"fan_on", 0}, {"pump_on", 0}, {"cooling_on", 0},
+    {"defrost_on", 0}, {"compressor_icon", 0},
+    {"compressor_freq", 0}, {"fan_speed", 0}, {"realtime_power", 0},
+    {"ac_voltage", 230}, {"ac_current", 0}, {"dc_voltage", 320}, {"primary_eev", 17},
+    {"outdoor_ambient_temp", 20}, {"inlet_water_temp", 25}, {"outlet_water_temp", 25},
+    {"water_tank_temp", 45}, {"discharge_temp", 25}, {"suction_temp", 20},
+    {"outdoor_coil_temp", 20}, {"indoor_coil_temp", 20}, {"ipm_temp", 20},
+    {"cooling_setpoint", 10}, {"heating_setpoint", 40}, {"hot_water_setpoint", 50},
+    {"hot_water_ceiling", 55},
+    {"working_mode", WM_HOT_WATER}, {"operating_direction", DIR_HEATING},
+};
+
+const FieldValue kHeating[] = {
+    {"unit_on", 1}, {"compressor_icon", 1}, {"pump_on", 1}, {"fan_on", 1},
+    {"compressor_freq", 50}, {"outdoor_ambient_temp", 5}, {"inlet_water_temp", 35},
+    {"outlet_water_temp", 42}, {"discharge_temp", 75}, {"suction_temp", 3},
+    {"outdoor_coil_temp", 2}, {"ipm_temp", 45}, {"primary_eev", 200},
+    {"realtime_power", 2800}, {"ac_current", 12}, {"dc_voltage", 360}, {"fan_speed", 700},
+    {"working_mode", WM_FLOOR},
+};
+
+const FieldValue kCooling[] = {
+    {"unit_on", 1}, {"compressor_icon", 1}, {"pump_on", 1}, {"fan_on", 1}, {"cooling_on", 1},
+    {"compressor_freq", 60}, {"outdoor_ambient_temp", 35}, {"inlet_water_temp", 12},
+    {"outlet_water_temp", 8}, {"discharge_temp", 65}, {"suction_temp", 5},
+    {"indoor_coil_temp", 6}, {"ipm_temp", 50}, {"primary_eev", 250},
+    {"realtime_power", 3000}, {"ac_current", 13}, {"dc_voltage", 360}, {"fan_speed", 800},
+    {"working_mode", WM_COOLING}, {"operating_direction", DIR_COOLING},
+};
+
+const FieldValue kHotWater[] = {
+    {"unit_on", 1}, {"compressor_icon", 1}, {"pump_on", 1},
+    {"compressor_freq", 55}, {"outdoor_ambient_temp", 20}, {"inlet_water_temp", 40},
+    {"outlet_water_temp", 48}, {"discharge_temp", 85}, {"suction_temp", 8},
+    {"ipm_temp", 48}, {"realtime_power", 3200}, {"water_tank_temp", 42},
+    {"ac_current", 12}, {"dc_voltage", 360},
+};
+
+const FieldValue kDefrost[] = {
+    {"unit_on", 1}, {"compressor_icon", 1}, {"pump_on", 1}, {"defrost_on", 1},
+    {"compressor_freq", 40}, {"outdoor_ambient_temp", -2}, {"inlet_water_temp", 30},
+    {"outlet_water_temp", 28}, {"outdoor_coil_temp", -5}, {"discharge_temp", 50},
+    {"working_mode", WM_FLOOR},
+};
+
+const FieldValue kFaultP01[] = {
+    {"outdoor_ambient_temp", 20},
+};
+
+struct PresetDef {
+    Preset            id;
+    const char       *key;
+    const FieldValue *fields;
+    size_t            count;
+    const char       *fault_code;   // extra fault to light, or nullptr
+};
+
+#define DEF(id, key, arr, fault) { Preset::id, key, arr, sizeof(arr) / sizeof(arr[0]), fault }
+const PresetDef kPresets[] = {
+    { Preset::IDLE, "idle", nullptr, 0, nullptr },
+    DEF(HEATING,   "heating",   kHeating,  nullptr),
+    DEF(COOLING,   "cooling",   kCooling,  nullptr),
+    DEF(HOT_WATER, "hot_water", kHotWater, nullptr),
+    DEF(DEFROST,   "defrost",   kDefrost,  nullptr),
+    DEF(FAULT_P01, "fault_p01", kFaultP01, "P01"),
+};
+#undef DEF
+
+const PresetDef *findPreset(Preset p) {
+    for (const PresetDef &d : kPresets) if (d.id == p) return &d;
+    return nullptr;
 }
 
-bool isInput(uint16_t addr) {
-    return addr >= INPUT_BASE && addr <= INPUT_END;
-}
-
-bool isValid(uint16_t addr) {
-    return isHolding(addr) || isInput(addr);
-}
-
-uint16_t* holdingData() { return s_holding; }
-uint16_t* inputData()   { return s_input;   }
-
-uint16_t get(uint16_t addr) {
-    if (isHolding(addr)) return s_holding[addr - HOLDING_BASE];
-    if (isInput(addr))   return s_input[addr - INPUT_BASE];
-    return 0;
-}
-
-esp_err_t set(uint16_t addr, uint16_t value) {
-    if (isHolding(addr)) {
-        s_holding[addr - HOLDING_BASE] = value;
-        tuya_state::projectSet(addr, value);   // mirror onto the wire
-        return ESP_OK;
+void applyFields(MaconImage &img, const FieldValue *fv, size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        const MaconFieldDesc *d = macon_field_find(fv[i].name);
+        const MaconSetResult r = d ? macon_field_set(img, *d, fv[i].value) : MaconSetResult::UnknownField;
+        if (r != MaconSetResult::Ok) {
+            ++s_rejects;
+            // A preset the library rejects is a programming error; make it loud.
+            ESP_LOGE(TAG, "preset field %s=%ld rejected (%d)", fv[i].name,
+                     (long)fv[i].value, (int)r);
+        }
     }
-    if (isInput(addr)) {
-        s_input[addr - INPUT_BASE] = value;
-        tuya_state::projectSet(addr, value);   // mirror onto the wire
-        return ESP_OK;
-    }
-    return ESP_ERR_NOT_FOUND;
 }
 
-// Project the entire register_map into tuya_state (used after bulk preset
-// loads that write the arrays directly). The telemetry-header regs (2093..2099)
-// are ordinary input registers now, so they project like everything else.
-static void syncAllToTuya() {
-    for (uint16_t a = HOLDING_BASE; a <= HOLDING_END; ++a) {
-        tuya_state::projectSet(a, s_holding[a - HOLDING_BASE]);
-    }
-    for (uint16_t a = INPUT_BASE; a <= INPUT_END; ++a) {
-        tuya_state::projectSet(a, s_input[a - INPUT_BASE]);
-    }
+void seedOemBaseline(MaconImage &img) {
+    const tuya_codec::RegWindow *h = tuya_codec::find_window(50, sizeof(kOemHolding));
+    const tuya_codec::RegWindow *t = tuya_codec::find_window(0, sizeof(kOemTelemetry));
+    if (h) img.ingest_bytes(h->reg_base, kOemHolding + h->prefix_len, sizeof(kOemHolding) - h->prefix_len);
+    if (t) img.ingest_bytes(t->reg_base, kOemTelemetry + t->prefix_len, sizeof(kOemTelemetry) - t->prefix_len);
 }
 
-// ============================================================================
-// Presets
-// ============================================================================
+}  // namespace
 
-static void clearAll() {
-    memset(s_holding, 0, sizeof(s_holding));
-    memset(s_input, 0, sizeof(s_input));
-}
-
-void clearErrors() {
-    // Clear all four INPUT fault bitfields (reg2125-2128) ...
-    const uint16_t faultRegs[4] = { FAULT_SENSOR_EE, FAULT_SENSOR_COMP, FAULT_ELEC, FAULT };
-    for (uint16_t a : faultRegs) {
-        s_input[a - INPUT_BASE] = 0;
-        tuya_state::projectSet(a, 0);
+bool presetFromKey(const char *key, Preset *out) {
+    if (!key) return false;
+    for (const PresetDef &d : kPresets) {
+        if (strcmp(d.key, key) == 0) { if (out) *out = d.id; return true; }
     }
-    // ... and the fault bits in the reg2007 run/fault register, preserving the
-    // hot-water RUN indicator (bit5, 0x20) so a running unit stays ON.
-    uint16_t rs = s_holding[RUN_STATE - HOLDING_BASE] & RUN_HOT_WATER;
-    s_holding[RUN_STATE - HOLDING_BASE] = rs;
-    tuya_state::projectSet(RUN_STATE, rs);
+    return false;
 }
 
-// Signed-byte encoding helper for negative temperatures (-6 °C -> 250).
-static inline uint16_t tempByte(int v) {
-    return (uint16_t)(uint8_t)(int8_t)v;
-}
-
-static void setCommonDefaults() {
-    // Telemetry-header registers 2093..2099 (byte0 = cooling setpoint). Seed
-    // the OEM-observed constants so the wire stays byte-identical until the
-    // controller writes a new setpoint.
-    for (uint16_t i = 0; i < sizeof(TELEMETRY_HEADER); ++i) {
-        s_input[(COOLING_SETPOINT + i) - INPUT_BASE] = TELEMETRY_HEADER[i];
-    }
-    // Mains present even when idle. AC voltage is x10 on the wire (raw 23 =
-    // 230 V); DC bus is x10 (raw ~36 = 360 V when running, low when idle).
-    s_input[AC_VOLTAGE - INPUT_BASE]        = 23;   // 230 V
-    s_holding[HOT_WATER_SETPOINT - HOLDING_BASE] = 55;
+const char *presetKey(Preset preset) {
+    const PresetDef *d = findPreset(preset);
+    return d ? d->key : "unknown";
 }
 
 void loadPreset(Preset preset) {
-    clearAll();
-    setCommonDefaults();
+    const PresetDef *d = findPreset(preset);
+    if (!d) return;
+    ESP_LOGI(TAG, "Loading preset: %s", d->key);
+    tuya_state::Access a;
+    MaconImage &img = a.image();
+    img.clear_faults();
+    applyFields(img, kCommon, sizeof(kCommon) / sizeof(kCommon[0]));
+    applyFields(img, d->fields, d->count);
+    if (d->fault_code) img.set_fault_by_code(d->fault_code, true);
+}
 
-    switch (preset) {
-    case Preset::IDLE:
-        ESP_LOGI(TAG, "Loading preset: IDLE");
-        // Compressor/pump off (status byte 0), ambient temps set.
-        s_input[STATUS_BYTE - INPUT_BASE]          = 0;
-        s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = tempByte(20);
-        s_input[INLET_WATER_TEMP - INPUT_BASE]     = tempByte(25);
-        s_input[OUTLET_WATER_TEMP - INPUT_BASE]    = tempByte(25);
-        s_holding[WATER_TANK_TEMP - HOLDING_BASE]  = tempByte(45);
-        break;
+int presetRejectCount() { return s_rejects; }
 
-    case Preset::HEATING:
-        ESP_LOGI(TAG, "Loading preset: HEATING");
-        s_holding[RUN_STATE - HOLDING_BASE]        = RUN_HOT_WATER;  // running code
-        s_input[STATUS_BYTE - INPUT_BASE]          = STS_HEATING | STS_COMPRESSOR | STS_WATER_PUMP;
-        s_input[ICON_BITS2 - INPUT_BASE]           = ICO2_FAN;
-        s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 50;
-        s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = tempByte(5);
-        s_input[INLET_WATER_TEMP - INPUT_BASE]     = tempByte(35);
-        s_input[OUTLET_WATER_TEMP - INPUT_BASE]    = tempByte(42);
-        s_input[DISCHARGE_TEMP - INPUT_BASE]       = tempByte(75);
-        s_input[SUCTION_TEMP - INPUT_BASE]         = tempByte(3);
-        s_input[COIL_TEMP - INPUT_BASE]            = tempByte(2);
-        s_input[IPM_TEMP - INPUT_BASE]             = tempByte(45);
-        s_input[MAIN_EEV - INPUT_BASE]             = 200;
-        s_input[REALTIME_POWER - INPUT_BASE]       = 28;   // ~2800 W
-        s_holding[AC_CURRENT - HOLDING_BASE]       = 12;   // 12 A
-        s_holding[DC_BUS_VOLTAGE - HOLDING_BASE]   = 36;   // 360 V
-        s_holding[DC_MOTOR_SPEED - HOLDING_BASE]   = 70;
-        break;
-
-    case Preset::COOLING:
-        ESP_LOGI(TAG, "Loading preset: COOLING");
-        s_holding[RUN_STATE - HOLDING_BASE]        = RUN_HOT_WATER;  // running code
-        s_input[STATUS_BYTE - INPUT_BASE]          = STS_COMPRESSOR | STS_WATER_PUMP;
-        s_input[ICON_BITS2 - INPUT_BASE]           = ICO2_FAN;
-        s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 60;
-        s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = tempByte(35);
-        s_input[INLET_WATER_TEMP - INPUT_BASE]     = tempByte(12);
-        s_input[OUTLET_WATER_TEMP - INPUT_BASE]    = tempByte(8);
-        s_input[DISCHARGE_TEMP - INPUT_BASE]       = tempByte(65);
-        s_input[SUCTION_TEMP - INPUT_BASE]         = tempByte(5);
-        s_input[COOL_COIL_TEMP - INPUT_BASE]       = tempByte(6);
-        s_input[IPM_TEMP - INPUT_BASE]             = tempByte(50);
-        s_input[MAIN_EEV - INPUT_BASE]             = 250;
-        s_input[REALTIME_POWER - INPUT_BASE]       = 30;   // ~3000 W
-        s_holding[AC_CURRENT - HOLDING_BASE]       = 13;
-        s_holding[DC_BUS_VOLTAGE - HOLDING_BASE]   = 36;
-        s_holding[DC_MOTOR_SPEED - HOLDING_BASE]   = 80;
-        break;
-
-    case Preset::HOT_WATER:
-        ESP_LOGI(TAG, "Loading preset: HOT_WATER");
-        s_holding[RUN_STATE - HOLDING_BASE]        = RUN_HOT_WATER;  // ON indicator (ground-truthed)
-        s_input[STATUS_BYTE - INPUT_BASE]          = STS_COMPRESSOR | STS_WATER_PUMP;
-        s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 55;
-        s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = tempByte(20);
-        s_input[INLET_WATER_TEMP - INPUT_BASE]     = tempByte(40);
-        s_input[OUTLET_WATER_TEMP - INPUT_BASE]    = tempByte(48);
-        s_input[DISCHARGE_TEMP - INPUT_BASE]       = tempByte(85);
-        s_input[SUCTION_TEMP - INPUT_BASE]         = tempByte(8);
-        s_input[IPM_TEMP - INPUT_BASE]             = tempByte(48);
-        s_input[REALTIME_POWER - INPUT_BASE]       = 32;   // ~3200 W
-        s_holding[WATER_TANK_TEMP - HOLDING_BASE]  = tempByte(42);
-        s_holding[HOT_WATER_SETPOINT - HOLDING_BASE] = 55;
-        s_holding[AC_CURRENT - HOLDING_BASE]       = 12;
-        s_holding[DC_BUS_VOLTAGE - HOLDING_BASE]   = 36;
-        break;
-
-    case Preset::DEFROST:
-        ESP_LOGI(TAG, "Loading preset: DEFROST");
-        s_holding[RUN_STATE - HOLDING_BASE]        = RUN_HOT_WATER;  // running code
-        s_input[STATUS_BYTE - INPUT_BASE]          = STS_COMPRESSOR | STS_WATER_PUMP;
-        s_input[ICON_BITS2 - INPUT_BASE]           = ICO2_DEFROST;
-        s_input[COMPRESSOR_FREQ - INPUT_BASE]      = 40;
-        s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = tempByte(-2);
-        s_input[INLET_WATER_TEMP - INPUT_BASE]     = tempByte(30);
-        s_input[OUTLET_WATER_TEMP - INPUT_BASE]    = tempByte(28);
-        s_input[COIL_TEMP - INPUT_BASE]            = tempByte(-5);
-        s_input[DISCHARGE_TEMP - INPUT_BASE]       = tempByte(50);
-        s_holding[DC_MOTOR_SPEED - HOLDING_BASE]   = 0;    // fan off during defrost
-        break;
-
-    case Preset::FAULT_P01:
-        ESP_LOGI(TAG, "Loading preset: FAULT_P01 (water-flow protection)");
-        // Compressor tripped off, water-flow fault bit set (reg 2128 bit7).
-        s_input[STATUS_BYTE - INPUT_BASE]          = 0;
-        s_input[FAULT - INPUT_BASE]                = FAULT_P01_WATER_FLOW;  // 0x80
-        s_input[OUTDOOR_AMBIENT_TEMP - INPUT_BASE] = tempByte(20);
-        break;
-    }
-
-    syncAllToTuya();
+void clearErrors() {
+    tuya_state::Access a;
+    a.image().clear_faults();
 }
 
 void init() {
-    // The Tuya slave serves from tuya_state; make sure it exists before we
-    // project the initial preset into it.
     tuya_state::init();
+    {
+        tuya_state::Access a;
+        seedOemBaseline(a.image());
+    }
     loadPreset(Preset::IDLE);
-    ESP_LOGI(TAG, "Register map initialized (holding: %d regs, input: %d regs)",
-             HOLDING_COUNT, INPUT_COUNT);
+    ESP_LOGI(TAG, "State initialised (OEM baseline + idle preset)");
+}
+
+bool isValid(uint16_t addr) { return tuya_state::projectKnows(addr); }
+
+uint16_t get(uint16_t addr) { return tuya_state::projectGet(addr); }
+
+esp_err_t set(uint16_t addr, uint16_t value) {
+    return tuya_state::projectSet(addr, value) ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
 }  // namespace reg

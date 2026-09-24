@@ -110,17 +110,17 @@ textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background:
   <div class="stats" id="tuya-stats"></div>
 </div>
 
-<!-- Controller Commands (holding registers — read-only, written by master) -->
-<h2>Controller Commands</h2>
+<!-- Setpoints (normally written by the controller over fc=0x06) -->
+<h2>Setpoints</h2>
 <div class="card">
   <div class="cmd-grid" id="cmd-display"></div>
 </div>
 
-<!-- System Status (input register 2135) -->
+<!-- Run flags, working mode, direction, presets -->
 <h2>System Status</h2>
 <div class="card">
   <div class="toggles" id="status-toggles"></div>
-  <div class="seg-row" id="fan-speed-control" style="margin-top:8px"></div>
+  <div id="mode-control" style="margin-top:8px"></div>
 </div>
 
 <!-- Temperatures & Sensors -->
@@ -182,217 +182,113 @@ textarea { width: 100%; height: 80px; margin-top: 8px; padding: 8px; background:
 const BASE = '';
 
 // ============================================================================
-// Controller Commands (holding registers — read-only display)
+// Everything below is generated from the simulator's semantic API, which is
+// the arctic-macon library's catalog: GET /api/fields, /api/state and
+// /api/faults/catalog. The page carries no register numbers or bit maps.
 // ============================================================================
-const MODE_NAMES = { 0: 'Cooling', 1: 'Floor Heat', 2: 'Fan Coil Heat', 5: 'Hot Water', 6: 'Auto' };
+let FIELDS = [];          // /api/fields
+let FAULTS = [];          // /api/faults/catalog
+let currentState = null;  // /api/state
+const PRESETS = ['idle', 'heating', 'cooling', 'hot_water', 'defrost', 'fault_p01'];
 
-function updateCommandDisplay() {
-  const on = !!(currentRegisters['2000']);
-  const mode = currentRegisters['2001'] || 0;
-  const coolSp = currentRegisters['2002'] || 0;
-  const heatSp = currentRegisters['2003'] || 0;
-  const hwSp   = currentRegisters['2004'] || 0;
+const TITLES = {
+  cooling_setpoint: 'Cooling SP', heating_setpoint: 'Heating SP',
+  hot_water_setpoint: 'Hot Water SP', hot_water_ceiling: 'Hot Water Ceiling',
+};
+function title(name) {
+  return TITLES[name] || name.replace(/_temp$/, '').replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+const isSetpoint = f => /setpoint|ceiling/.test(f.name);
+const isTemp = f => /_temp$/.test(f.name);
 
-  document.getElementById('cmd-display').innerHTML = `
-    <div class="cmd-item"><div class="cmd-label">Power</div><div class="cmd-value ${on ? 'on' : 'off'}">${on ? 'ON' : 'OFF'}</div></div>
-    <div class="cmd-item"><div class="cmd-label">Mode</div><div class="cmd-value">${MODE_NAMES[mode] || 'Unknown (' + mode + ')'}</div></div>
-    <div class="cmd-item"><div class="cmd-label">Cooling SP</div><div class="cmd-value">${coolSp}°C</div></div>
-    <div class="cmd-item"><div class="cmd-label">Heating SP</div><div class="cmd-value">${heatSp}°C</div></div>
-    <div class="cmd-item"><div class="cmd-label">Hot Water SP</div><div class="cmd-value">${hwSp}°C</div></div>
-  `;
+async function patchState(obj) {
+  try {
+    const r = await fetch(BASE + '/api/state', {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(obj)
+    });
+    const body = await r.json();
+    if (!r.ok) { toast(body.error || 'Rejected', true); refresh(); return; }
+    currentState = body;
+    updateUI();
+  } catch(e) { toast('Error: ' + e.message, true); }
 }
 
-// ============================================================================
-// Status indicators (register 2135 bits — read-only)
-// ============================================================================
-const STATUS_BITS = [
-  { bit: 0,  label: 'Unit ON' },
-  { bit: 1,  label: 'Compressor' },
-  { bit: 5,  label: 'Water Pump' },
-  { bit: 6,  label: '4-Way Valve' },
-  { bit: 7,  label: 'Elec Heater' },
-  { bit: 8,  label: 'Water Flow' },
-  { bit: 11, label: 'Remote ON' },
-  { bit: 13, label: '3-Way V1' },
-  { bit: 14, label: '3-Way V2' },
-];
+function numberRow(f) {
+  const unverified = f.verified ? '' : ' <span class="unit" title="Mapping not verified on real hardware">(unverified)</span>';
+  return `<div class="val-row">
+    <span>${title(f.name)}${unverified}</span>
+    <div><input type="number" id="fld-${f.name}" min="${f.min}" max="${f.max}" step="${f.step}"
+      onchange="patchState({'${f.name}': Math.round(parseFloat(this.value))})"
+      ><span class="unit">${f.unit || ''}</span></div>
+  </div>`;
+}
 
-// Fan speed: bits 2/3/4 are mutually exclusive
-const FAN_SPEEDS = [
-  { label: 'Off',  bits: 0 },
-  { label: 'Low',  bits: (1 << 4) },
-  { label: 'Med',  bits: (1 << 3) },
-  { label: 'High', bits: (1 << 2) },
-];
-const FAN_MASK = (1 << 2) | (1 << 3) | (1 << 4);
+function renderControls() {
+  const nums = FIELDS.filter(f => f.kind === 'number');
+  document.getElementById('cmd-display').innerHTML =
+    '<div class="values">' + nums.filter(isSetpoint).map(numberRow).join('') + '</div>';
+  document.getElementById('temp-values').innerHTML =
+    nums.filter(f => isTemp(f) && !isSetpoint(f)).map(numberRow).join('');
+  document.getElementById('elec-values').innerHTML =
+    nums.filter(f => !isTemp(f) && !isSetpoint(f)).map(numberRow).join('');
 
-function renderToggles() {
-  const el = document.getElementById('status-toggles');
-  el.innerHTML = STATUS_BITS.map(s =>
+  document.getElementById('status-toggles').innerHTML = FIELDS.filter(f => f.kind === 'flag').map(f =>
     `<div class="toggle">
-      <label for="sts-${s.bit}">${s.label}</label>
-      <label class="switch"><input type="checkbox" id="sts-${s.bit}" data-bit="${s.bit}" onchange="toggleStatusBit(${s.bit})"><span class="slider"></span></label>
-    </div>`
-  ).join('');
+      <label for="fld-${f.name}">${title(f.name)}</label>
+      <label class="switch"><input type="checkbox" id="fld-${f.name}"
+        onchange="patchState({'${f.name}': this.checked})"><span class="slider"></span></label>
+    </div>`).join('');
 
-  // Fan speed segmented control
-  const fc = document.getElementById('fan-speed-control');
-  fc.innerHTML = '<span class="seg-label">Fan Speed</span><div class="seg-group">' +
-    FAN_SPEEDS.map((f, i) =>
-      `<button data-fan="${i}" onclick="setFanSpeed(${i})">${f.label}</button>`
-    ).join('') + '</div>';
-}
+  const enums = FIELDS.filter(f => f.options);
+  document.getElementById('mode-control').innerHTML = enums.map(f =>
+    `<div class="seg-row"><span class="seg-label">${title(f.name)}</span><div class="seg-group">` +
+    f.options.map(o => `<button data-${f.name}="${o}" onclick="patchState({'${f.name}': '${o}'})">${title(o)}</button>`).join('') +
+    '</div></div>').join('') +
+    '<div class="seg-row"><span class="seg-label">Preset</span><div class="seg-group">' +
+    PRESETS.map(p => `<button onclick="loadPreset('${p}')">${title(p)}</button>`).join('') + '</div></div>';
 
-async function setFanSpeed(idx) {
-  let val = currentRegisters['2135'] || 0;
-  val = (val & ~FAN_MASK) | FAN_SPEEDS[idx].bits;
-  await setRegister(2135, val);
-}
-
-async function toggleStatusBit(bit) {
-  const cb = document.getElementById('sts-' + bit);
-  let val = currentRegisters['2135'] || 0;
-  if (cb.checked) val |= (1 << bit);
-  else val &= ~(1 << bit);
-  await setRegister(2135, val);
-}
-
-// ============================================================================
-// Temperature & sensor value inputs — whole °C, no scaling
-// ============================================================================
-const TEMP_FIELDS = [
-  { addr: 2100, label: 'Water Tank', unit: '°C' },
-  { addr: 2102, label: 'Outlet Water', unit: '°C' },
-  { addr: 2103, label: 'Inlet Water', unit: '°C' },
-  { addr: 2104, label: 'Discharge', unit: '°C' },
-  { addr: 2105, label: 'Suction', unit: '°C' },
-  { addr: 2107, label: 'Outdoor Coil', unit: '°C' },
-  { addr: 2108, label: 'Indoor Coil', unit: '°C' },
-  { addr: 2110, label: 'Outdoor Ambient', unit: '°C' },
-  { addr: 2114, label: 'IPM Temp', unit: '°C' },
-];
-
-const ELEC_FIELDS = [
-  { addr: 2118, label: 'Compressor Freq', unit: 'Hz' },
-  { addr: 2119, label: 'Fan Speed', unit: 'RPM' },
-  { addr: 2120, label: 'AC Voltage', unit: 'V' },
-  { addr: 2121, label: 'AC Current', unit: 'A' },
-  { addr: 2122, label: 'DC Voltage', unit: 'V' },
-  { addr: 2124, label: 'Primary EEV', unit: 'stp' },
-  { addr: 2126, label: 'High Pressure', unit: 'kPa' },
-  { addr: 2127, label: 'Low Pressure', unit: 'kPa' },
-];
-
-function renderValues(fields, containerId) {
-  const el = document.getElementById(containerId);
-  el.innerHTML = fields.map(f =>
-    `<div class="val-row">
-      <span>${f.label}</span>
-      <div><input type="number" id="val-${f.addr}" data-addr="${f.addr}"
-        step="1"
-        onchange="onValueChange(${f.addr})"
-        ><span class="unit">${f.unit}</span></div>
-    </div>`
-  ).join('');
-}
-
-async function onValueChange(addr) {
-  const input = document.getElementById('val-' + addr);
-  const raw = Math.round(parseFloat(input.value));
-  await setRegister(addr, raw);
-}
-
-// ============================================================================
-// Error injection buttons
-// ============================================================================
-const ERROR_GROUPS = [
-  { heading: 'Sensor Faults (E-series)', errors: [
-    { label: 'E01',  reg: 2137, bit: 6,  desc: 'Discharge temp sensor' },
-    { label: 'E05',  reg: 2137, bit: 5,  desc: 'External coil sensor' },
-    { label: 'E09',  reg: 2137, bit: 7,  desc: 'Suction temp sensor' },
-    { label: 'E13',  reg: 2137, bit: 4,  desc: 'Cooling coil sensor' },
-    { label: 'E18',  reg: 2137, bit: 3,  desc: 'Outlet water sensor' },
-    { label: 'E19',  reg: 2137, bit: 2,  desc: 'Inlet water sensor' },
-    { label: 'E20',  reg: 2134, bit: 3,  desc: 'Tank temp sensor' },
-    { label: 'E22',  reg: 2137, bit: 8,  desc: 'Ambient temp sensor' },
-    { label: 'E28',  reg: 2137, bit: 1,  desc: 'Outdoor EEPROM' },
-    { label: 'E33',  reg: 2138, bit: 6,  desc: 'High pressure sensor' },
-  ]},
-  { heading: 'Communication', errors: [
-    { label: 'E21',  reg: 2137, bit: 10, desc: 'Wired controller comm' },
-    { label: 'InEE', reg: 2137, bit: 0,  desc: 'Indoor EEPROM' },
-    { label: 'DrvC', reg: 2137, bit: 9,  desc: 'Drive ↔ main board' },
-    { label: 'IOC',  reg: 2137, bit: 12, desc: 'Indoor ↔ outdoor' },
-  ]},
-  { heading: 'Protection (P-series)', errors: [
-    { label: 'P01',  reg: 2138, bit: 8,  desc: 'Water flow switch' },
-    { label: 'P02',  reg: 2138, bit: 6,  desc: 'High pressure switch' },
-    { label: 'P06',  reg: 2138, bit: 7,  desc: 'Low pressure switch' },
-    { label: 'P11',  reg: 2138, bit: 5,  desc: 'High discharge temp' },
-    { label: 'P15',  reg: 2138, bit: 13, desc: 'Large ΔT inlet/outlet' },
-    { label: 'P16',  reg: 2138, bit: 14, desc: 'Low outlet water temp' },
-    { label: 'P19',  reg: 2138, bit: 0,  desc: 'AC current' },
-    { label: 'P27',  reg: 2138, bit: 9,  desc: 'Coil overheat' },
-    { label: 'PA',   reg: 2137, bit: 14, desc: 'High outlet water temp' },
-    { label: 'EC',   reg: 2138, bit: 11, desc: 'Primary low pressure' },
-    { label: 'LAmb', reg: 2138, bit: 10, desc: 'Low ambient temp' },
-  ]},
-  { heading: 'Hardware / Runtime (r-series)', errors: [
-    { label: 'r01',  reg: 2137, bit: 13, desc: 'IPM module fault' },
-    { label: 'r02',  reg: 2137, bit: 11, desc: 'Compressor start' },
-    { label: 'r05',  reg: 2138, bit: 4,  desc: 'IPM over-temperature' },
-    { label: 'r06',  reg: 2138, bit: 1,  desc: 'Compressor phase current' },
-    { label: 'r10',  reg: 2137, bit: 15, desc: 'AC voltage high/low' },
-    { label: 'r11',  reg: 2138, bit: 3,  desc: 'DC bus voltage' },
-    { label: 'r20',  reg: 2138, bit: 15, desc: 'Compressor diff pressure' },
-    { label: 'FA',   reg: 2138, bit: 2,  desc: 'DC fan motor' },
-  ]},
-  { heading: 'Brine / Secondary', errors: [
-    { label: 'BrIn',  reg: 2134, bit: 0, desc: 'Brine inlet sensor' },
-    { label: 'BrOut', reg: 2134, bit: 1, desc: 'Brine outlet sensor' },
-    { label: 'BrFlw', reg: 2134, bit: 2, desc: 'Brine flow protect' },
-    { label: '2ndLP', reg: 2138, bit: 12, desc: 'Secondary low pressure' },
-  ]},
-];
-
-// Flat list for updateUI lookups
-const ERROR_DEFS = ERROR_GROUPS.flatMap(g => g.errors);
-
-function renderErrorButtons() {
-  const el = document.getElementById('error-groups');
-  let globalIdx = 0;
-  el.innerHTML = ERROR_GROUPS.map(g => {
-    const btns = g.errors.map(e => {
-      const idx = globalIdx++;
-      return `<button data-erridx="${idx}" onclick="toggleError(${idx})" title="${e.desc}">${e.label}</button>`;
-    }).join('');
-    return `<div class="err-group"><div class="err-group-label">${g.heading}</div><div class="err-group-btns">${btns}</div></div>`;
+  document.getElementById('error-groups').innerHTML = ['critical', 'error', 'warning'].map(sev => {
+    const list = FAULTS.filter(f => f.severity === sev);
+    if (!list.length) return '';
+    const btns = list.flatMap(f => f.sites.map(s =>
+      `<button data-site="${s.site}" onclick="toggleSite(${s.site})" title="${s.label}">${f.code}${f.sites.length > 1 ? ' · ' + s.label : ''}</button>`
+    )).join('');
+    return `<div class="err-group"><div class="err-group-label">${title(sev)}</div><div class="err-group-btns">${btns}</div></div>`;
   }).join('');
 }
 
-async function toggleError(idx) {
-  const e = ERROR_DEFS[idx];
-  let val = currentRegisters[String(e.reg)] || 0;
-  val ^= (1 << e.bit);
-  await setRegister(e.reg, val);
+async function loadPreset(name) {
+  try {
+    const r = await fetch(BASE + '/api/preset', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name })
+    });
+    toast(r.ok ? 'Preset ' + title(name) : 'Preset failed', !r.ok);
+    refresh();
+  } catch(e) { toast('Error: ' + e.message, true); }
 }
 
-// ============================================================================
-// Register I/O
-// ============================================================================
-let currentRegisters = {};
-
-async function setRegister(addr, value) {
+async function toggleSite(site) {
+  const active = (currentState?.faults || []).some(f => f.site === site);
   try {
-    const r = await fetch(BASE + '/api/registers?addr=' + addr, {
-      method: 'PUT', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ value: value })
+    const r = await fetch(BASE + '/api/faults', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ site, active: !active })
     });
-    if (r.ok) {
-      currentRegisters[String(addr)] = value;
-      updateUI();
-    } else { toast('Failed to set register', true); }
+    if (!r.ok) toast('Fault injection failed', true);
+    refresh();
   } catch(e) { toast('Error: ' + e.message, true); }
+}
+
+async function loadCatalog() {
+  try {
+    const [f, c] = await Promise.all([fetch(BASE + '/api/fields'), fetch(BASE + '/api/faults/catalog')]);
+    FIELDS = (await f.json()).fields;
+    FAULTS = (await c.json()).faults;
+    renderControls();
+  } catch(e) { toast('Failed to load catalog', true); }
 }
 
 async function refresh() {
@@ -402,7 +298,8 @@ async function refresh() {
       const s = await statusResp.json();
       document.getElementById('dot-tuya').className = 'dot ' + (s.tuya_active ? 'on' : 'off');
       document.getElementById('dot-wifi').className = 'dot on';
-      document.getElementById('version-info').textContent = 'v' + s.version;
+      document.getElementById('version-info').textContent = 'v' + s.version +
+        (s.macon ? ` · macon ${s.macon.layout_fingerprint}` : '');
       document.getElementById('tuya-stats').textContent =
         `Frames: ${s.tuya_stats.frames_seen}  Req: ${s.tuya_stats.requests_handled}  Resp: ${s.tuya_stats.responses_sent}  Errors: ${s.tuya_stats.parse_errors}`;
       // Don't overwrite playback state when browser has a capture loaded
@@ -411,72 +308,39 @@ async function refresh() {
           `${s.playback.state} (${s.playback.position}/${s.playback.entries})`;
       }
     }
-
-    const regResp = await fetch(BASE + '/api/registers');
-    if (regResp.ok) {
-      const data = await regResp.json();
-      currentRegisters = { ...data.holding, ...data.input };
-      updateUI();
-    }
+    const st = await fetch(BASE + '/api/state');
+    if (st.ok) { currentState = await st.json(); updateUI(); }
   } catch(e) {
     document.getElementById('dot-wifi').className = 'dot off';
   }
 }
 
 function updateUI() {
-  // Controller commands (read-only)
-  updateCommandDisplay();
-
-  // Status toggles
-  const sts2 = currentRegisters['2135'] || 0;
-  STATUS_BITS.forEach(s => {
-    const cb = document.getElementById('sts-' + s.bit);
-    if (cb) cb.checked = !!(sts2 & (1 << s.bit));
-  });
-
-  // Fan speed segmented control
-  const fanBits = sts2 & FAN_MASK;
-  FAN_SPEEDS.forEach((f, i) => {
-    const btn = document.querySelector(`[data-fan="${i}"]`);
-    if (btn) btn.classList.toggle('active', f.bits === fanBits);
-  });
-
-  // Temperature & electrical values
-  [...TEMP_FIELDS, ...ELEC_FIELDS].forEach(f => {
-    const input = document.getElementById('val-' + f.addr);
-    if (input && document.activeElement !== input) {
-      input.value = currentRegisters[String(f.addr)] || 0;
+  if (!currentState) return;
+  const v = currentState.fields;
+  FIELDS.forEach(f => {
+    const el = document.getElementById('fld-' + f.name);
+    if (el && document.activeElement !== el) {
+      if (f.kind === 'flag') el.checked = !!v[f.name];
+      else if (f.kind === 'number') el.value = v[f.name] ?? '';
     }
+    if (f.options) f.options.forEach(o => {
+      const b = document.querySelector(`[data-${f.name}="${o}"]`);
+      if (b) b.classList.toggle('active', v[f.name] === o);
+    });
   });
 
-  // Error display
-  const e1 = currentRegisters['2134'] || 0;
-  const e2 = currentRegisters['2137'] || 0;
-  const e3 = currentRegisters['2138'] || 0;
+  const faults = currentState.faults || [];
   const errEl = document.getElementById('error-display');
-  if (e1 || e2 || e3) {
-    const codes = [];
-    ERROR_DEFS.forEach(e => {
-      const regVal = currentRegisters[String(e.reg)] || 0;
-      if (regVal & (1 << e.bit)) codes.push(e.label);
-    });
-    if (codes.length === 0) codes.push(`raw: ${e1}/${e2}/${e3}`);
-    errEl.textContent = codes.join(', ');
+  if (faults.length) {
+    errEl.textContent = faults.map(f => `${f.code} ${f.label}`).join(', ');
     errEl.className = 'error-flags';
   } else {
-    errEl.textContent = 'No errors';
+    errEl.textContent = `No errors · ${currentState.operation}`;
     errEl.className = 'error-flags none';
   }
-
-  // Error inject button highlights
-  ERROR_DEFS.forEach((e, i) => {
-    const btn = document.querySelector(`[data-erridx="${i}"]`);
-    if (btn) {
-      const regVal = currentRegisters[String(e.reg)] || 0;
-      const active = !!(regVal & (1 << e.bit));
-      btn.classList.toggle('active', active);
-    }
-  });
+  document.querySelectorAll('[data-site]').forEach(b =>
+    b.classList.toggle('active', faults.some(f => f.site === Number(b.dataset.site))));
 }
 
 // ============================================================================
@@ -484,7 +348,7 @@ function updateUI() {
 // ============================================================================
 async function clearErrors() {
   try {
-    await fetch(BASE + '/api/errors/clear', { method: 'POST' });
+    await fetch(BASE + '/api/faults/clear', { method: 'POST' });
     toast('Errors cleared');
     refresh();
   } catch(e) { toast('Error: ' + e.message, true); }
@@ -712,11 +576,7 @@ async function rebootDevice() {
 // ============================================================================
 // Init
 // ============================================================================
-renderToggles();
-renderErrorButtons();
-renderValues(TEMP_FIELDS, 'temp-values');
-renderValues(ELEC_FIELDS, 'elec-values');
-refresh();
+loadCatalog().then(refresh);
 setInterval(refresh, 2000);
 </script>
 </body>

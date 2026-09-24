@@ -12,7 +12,8 @@
  * Pin assignments come from Kconfig (Display & Button menu).
  */
 #include "display.h"
-#include "register_map.h"
+#include "tuya_state.h"
+#include "macon_faults.h"
 #include "playback.h"
 #include "wifi_manager.h"
 
@@ -278,30 +279,44 @@ static void renderProvisioningUI() {
     fbDrawStrCentered(94, "192.168.4.1", COL_YELLOW, COL_BLACK, 1);
 }
 
-/// Map mode number to short display name.
-static const char* runStateLabel(uint16_t status) {
-    if (status & reg::STS_COMPRESSOR) return "Running";
-    if (status & reg::STS_WATER_PUMP) return "Pump";
+/// Short run-state label from the decoded state (compressor running = freq > 0).
+static const char* runStateLabel(const arctic::MaconState& s) {
+    if (s.compressor_freq > 0) return "Running";
+    if (s.pump_on) return "Pump";
     return "Idle";
 }
 
-/// Check key registers for changes and update notification.
+// Compact change key for the decoded run flags (compressor running, pump).
+static uint16_t runKey(const arctic::MaconState& s) {
+    return (uint16_t)((s.compressor_freq > 0 ? 1 : 0) | (s.pump_on ? 2 : 0));
+}
+
+// Compact change key for the five fault registers.
+static uint16_t faultKey(const arctic::MaconState& s) {
+    uint32_t h = s.fault_run & 0x0F;   // RUN bit is not a fault
+    h = h * 31 + s.fault_ee; h = h * 31 + s.fault_comp;
+    h = h * 31 + s.fault_elec; h = h * 31 + s.fault_ref;
+    return (uint16_t)(h ^ (h >> 16));
+}
+
+/// Check key state for changes and update notification.
 static void detectChanges() {
-    uint16_t status = reg::get(reg::STATUS_BYTE);
-    uint16_t fault  = reg::get(reg::FAULT);
-    uint16_t freq   = reg::get(reg::COMPRESSOR_FREQ);
+    arctic::MaconState s{};
+    tuya_state::decode(&s);
+    arctic::MaconFault faults[8];
+    const size_t nf = arctic::macon_decode_faults(s.fault_run, s.fault_ee, s.fault_comp,
+                                                  s.fault_elec, s.fault_ref, faults, 8);
+    uint16_t status = runKey(s);
+    uint16_t fault  = nf ? faultKey(s) : 0;
+    uint16_t freq   = s.compressor_freq;
 
     bool changed = false;
 
-    // Faults take priority.
+    // Faults take priority (highest severity first, from the library catalog).
     if (fault != s_prev_fault) {
-        if (fault) {
-            snprintf(s_notif_line1, sizeof(s_notif_line1), "FAULT");
-            if (fault & reg::FAULT_P01_WATER_FLOW) {
-                snprintf(s_notif_line2, sizeof(s_notif_line2), "P01 Water Flow");
-            } else {
-                snprintf(s_notif_line2, sizeof(s_notif_line2), "reg2128=0x%02X", fault & 0xFF);
-            }
+        if (nf) {
+            snprintf(s_notif_line1, sizeof(s_notif_line1), "FAULT %s", faults[0].code);
+            snprintf(s_notif_line2, sizeof(s_notif_line2), "%.21s", faults[0].label);
             s_notif_color = COL_RED;
         } else {
             snprintf(s_notif_line1, sizeof(s_notif_line1), "Fault Cleared");
@@ -311,14 +326,14 @@ static void detectChanges() {
         changed = true;
     }
 
-    // Status byte bit changes (compressor, pump).
+    // Run flag changes (compressor, pump).
     if (!changed && status != s_prev_status) {
         uint16_t diff = status ^ s_prev_status;
         const char* what = nullptr;
         bool is_on = false;
         struct { uint16_t bit; const char* name; } bits[] = {
-            { reg::STS_COMPRESSOR, "Compressor" },
-            { reg::STS_WATER_PUMP, "Water Pump" },
+            { 1, "Compressor" },
+            { 2, "Water Pump" },
         };
         for (auto& b : bits) {
             if (diff & b.bit) {
@@ -370,12 +385,12 @@ static void renderNormalUI() {
     fbHLine(16, 36, LCD_W - 32, COL_DARK_GRAY);
 
     // Status summary line — run state + compressor frequency
-    uint16_t status = reg::get(reg::STATUS_BYTE);
-    uint16_t freq   = reg::get(reg::COMPRESSOR_FREQ);
-    bool running = (status & (reg::STS_COMPRESSOR | reg::STS_WATER_PUMP)) != 0;
+    arctic::MaconState st{};
+    tuya_state::decode(&st);
+    bool running = st.compressor_freq > 0 || st.pump_on;
     char summary[22];
     snprintf(summary, sizeof(summary), "%s %uHz",
-             runStateLabel(status), freq);
+             runStateLabel(st), (unsigned)st.compressor_freq);
     fbDrawStrCentered(42, summary, running ? COL_GREEN : COL_ORANGE,
                       COL_BLACK, 1);
 

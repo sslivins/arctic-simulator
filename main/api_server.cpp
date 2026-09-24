@@ -2,9 +2,11 @@
  * REST API Server — Implementation
  *
  * Endpoints:
- *   GET  /api/status                -- Simulator status + Tuya stats
- *   GET  /api/heatpump              — Abstracted heat pump state
- *   GET  /api/registers             — All register values (raw)
+ *   GET  /api/status                -- Simulator status + Tuya stats + macon fingerprints
+ *   GET  /api/heatpump              — Summary heat pump state (library decode)
+ *   (semantic API — see semantic_api.h: /api/fields, /api/state,
+ *    /api/faults[/catalog|/clear], /api/lease)
+ *   GET  /api/registers             — All register values (raw, debug only)
  *   GET  /api/registers?addr=XXXX   — Single register
  *   PUT  /api/registers?addr=XXXX   — Set single register { "value": N }
  *   POST /api/registers/bulk        — Set multiple registers { "registers": { "2100": 350, ... } }
@@ -24,6 +26,10 @@
  */
 #include "api_server.h"
 #include "register_map.h"
+#include "semantic_api.h"
+#include "tuya_state.h"
+#include "tuya_codec.h"
+#include "macon_fields.h"
 #include "tuya_slave.h"
 #include "simulation.h"
 #include "playback.h"
@@ -64,21 +70,6 @@ static esp_err_t handleDashboard(httpd_req_t* req) {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-static void addActiveFaults(cJSON* arr, uint16_t fault) {
-    // Macon fault byte (reg 2128). Only bit7 (P01 water-flow) is confirmed;
-    // any other set bit is reported generically so the raw value stays visible
-    // for the ongoing fault-bit reverse-engineering.
-    if (fault & reg::FAULT_P01_WATER_FLOW) {
-        cJSON_AddItemToArray(arr, cJSON_CreateString("P01_water_flow"));
-    }
-    uint16_t undecoded = fault & ~(uint16_t)reg::FAULT_P01_WATER_FLOW;
-    if (undecoded) {
-        char buf[24];
-        snprintf(buf, sizeof(buf), "undecoded_0x%02X", undecoded & 0xFF);
-        cJSON_AddItemToArray(arr, cJSON_CreateString(buf));
-    }
-}
 
 static esp_err_t sendJson(httpd_req_t* req, cJSON* json) {
     char* str = cJSON_PrintUnformatted(json);
@@ -126,59 +117,58 @@ static char* readBody(httpd_req_t* req, int max_len = 8192) {
 // ============================================================================
 
 static esp_err_t handleGetHeatpump(httpd_req_t* req) {
-    uint16_t status = reg::get(reg::STATUS_BYTE);
-    uint16_t fault  = reg::get(reg::FAULT);
+    // Summary view decoded by the arctic-macon library (same decode the
+    // controller runs). The full named-field view is GET /api/state.
+    arctic::MaconState s{};
+    tuya_state::decode(&s);
+    const bool compressor_running = s.compressor_freq > 0;
 
     cJSON* json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "running", compressor_running || s.pump_on);
+    cJSON_AddStringToObject(json, "operation",
+                            arctic::operation_name(arctic::decode_operation(s)));
+    const char* wm = arctic::macon_working_mode_key(s.working_mode);
+    const char* dir = arctic::macon_direction_key(s.mode);
+    cJSON_AddStringToObject(json, "working_mode", wm ? wm : "unknown");
+    cJSON_AddStringToObject(json, "operating_direction", dir ? dir : "unknown");
 
-    // --- Running state (derived from the Macon status byte, reg 2130) ---
-    bool compressor_on = (status & reg::STS_COMPRESSOR) != 0;
-    bool pump_on       = (status & reg::STS_WATER_PUMP) != 0;
-    cJSON_AddBoolToObject(json, "running", compressor_on || pump_on);
-    cJSON_AddNumberToObject(json, "status_raw", status);
-
-    // --- Setpoint ---
     cJSON* sp = cJSON_AddObjectToObject(json, "setpoints");
-    cJSON_AddNumberToObject(sp, "hot_water", (int8_t)reg::get(reg::HOT_WATER_SETPOINT));
+    cJSON_AddNumberToObject(sp, "cooling", s.cooling_setpoint);
+    cJSON_AddNumberToObject(sp, "heating", s.aux_heat_setpoint);
+    cJSON_AddNumberToObject(sp, "hot_water", s.hot_water_setpoint);
+    cJSON_AddNumberToObject(sp, "hot_water_ceiling", s.hot_water_ceiling);
 
-    // --- Temperatures (whole °C, signed byte) ---
     cJSON* temps = cJSON_AddObjectToObject(json, "temperatures");
-    cJSON_AddNumberToObject(temps, "outlet_water", (int8_t)reg::get(reg::OUTLET_WATER_TEMP));
-    cJSON_AddNumberToObject(temps, "inlet_water", (int8_t)reg::get(reg::INLET_WATER_TEMP));
-    cJSON_AddNumberToObject(temps, "water_tank", (int8_t)reg::get(reg::WATER_TANK_TEMP));
-    cJSON_AddNumberToObject(temps, "outdoor_ambient", (int8_t)reg::get(reg::OUTDOOR_AMBIENT_TEMP));
-    cJSON_AddNumberToObject(temps, "discharge", (int8_t)reg::get(reg::DISCHARGE_TEMP));
-    cJSON_AddNumberToObject(temps, "suction", (int8_t)reg::get(reg::SUCTION_TEMP));
-    cJSON_AddNumberToObject(temps, "coil", (int8_t)reg::get(reg::COIL_TEMP));
-    cJSON_AddNumberToObject(temps, "cool_coil", (int8_t)reg::get(reg::COOL_COIL_TEMP));
-    cJSON_AddNumberToObject(temps, "ipm", (int8_t)reg::get(reg::IPM_TEMP));
+    cJSON_AddNumberToObject(temps, "outlet_water", s.outlet_c);
+    cJSON_AddNumberToObject(temps, "inlet_water", s.inlet_c);
+    cJSON_AddNumberToObject(temps, "water_tank", s.water_tank_c);
+    cJSON_AddNumberToObject(temps, "outdoor_ambient", s.outdoor_ambient_c);
+    cJSON_AddNumberToObject(temps, "discharge", s.discharge_c);
+    cJSON_AddNumberToObject(temps, "suction", s.suction_c);
+    cJSON_AddNumberToObject(temps, "outdoor_coil", s.outdoor_coil_c);
+    cJSON_AddNumberToObject(temps, "indoor_coil", s.indoor_coil_c);
+    cJSON_AddNumberToObject(temps, "ipm", s.ipm_c);
 
-    // --- Compressor ---
     cJSON* comp = cJSON_AddObjectToObject(json, "compressor");
-    cJSON_AddBoolToObject(comp, "running", compressor_on);
-    cJSON_AddNumberToObject(comp, "frequency", reg::get(reg::COMPRESSOR_FREQ));
+    cJSON_AddBoolToObject(comp, "running", compressor_running);
+    cJSON_AddNumberToObject(comp, "frequency", s.compressor_freq);
 
-    // --- Electrical (display scales: voltages x10 V, power x100 W) ---
     cJSON* elec = cJSON_AddObjectToObject(json, "electrical");
-    cJSON_AddNumberToObject(elec, "ac_voltage", reg::get(reg::AC_VOLTAGE) * 10);
-    cJSON_AddNumberToObject(elec, "ac_current", reg::get(reg::AC_CURRENT));
-    cJSON_AddNumberToObject(elec, "dc_bus_voltage", reg::get(reg::DC_BUS_VOLTAGE) * 10);
-    cJSON_AddNumberToObject(elec, "realtime_power", reg::get(reg::REALTIME_POWER) * 100);
+    cJSON_AddNumberToObject(elec, "ac_voltage", s.ac_voltage);
+    cJSON_AddNumberToObject(elec, "ac_current", s.ac_current);
+    cJSON_AddNumberToObject(elec, "dc_bus_voltage", s.dc_voltage);
+    cJSON_AddNumberToObject(elec, "realtime_power", s.realtime_power_w);
 
-    // --- Peripherals ---
     cJSON* periph = cJSON_AddObjectToObject(json, "peripherals");
-    cJSON_AddBoolToObject(periph, "water_pump", pump_on);
-    cJSON_AddNumberToObject(periph, "main_eev", reg::get(reg::MAIN_EEV));
-    cJSON_AddNumberToObject(periph, "fan_speed", reg::get(reg::DC_MOTOR_SPEED));
+    cJSON_AddBoolToObject(periph, "water_pump", s.pump_on);
+    cJSON_AddBoolToObject(periph, "fan", s.fan_on);
+    cJSON_AddBoolToObject(periph, "defrost", s.defrost_on);
+    cJSON_AddNumberToObject(periph, "main_eev", s.primary_eev);
+    cJSON_AddNumberToObject(periph, "fan_speed", s.fan_level);
 
-    // --- Faults (reg 2128) ---
-    cJSON_AddBoolToObject(json, "has_faults", fault != 0);
-    cJSON_AddNumberToObject(json, "fault_raw", fault);
-    cJSON* faults = cJSON_AddArrayToObject(json, "faults");
-    if (fault) {
-        addActiveFaults(faults, fault);
-    }
-
+    semantic_api::addActiveFaults(json, "faults");
+    cJSON_AddBoolToObject(json, "has_faults",
+                          cJSON_GetArraySize(cJSON_GetObjectItem(json, "faults")) > 0);
     return sendJson(req, json);
 }
 
@@ -196,6 +186,7 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
     cJSON_AddStringToObject(json, "version", app->version);
     cJSON_AddStringToObject(json, "hostname", wifi::getHostname());
     cJSON_AddBoolToObject(json, "tuya_active", tuya_slave::isInitialized());
+    semantic_api::addMaconInfo(json);
 
     cJSON* tu = cJSON_AddObjectToObject(json, "tuya_stats");
     cJSON_AddNumberToObject(tu, "frames_seen", stats.frames_seen);
@@ -230,6 +221,17 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
 // GET /api/registers
 // ============================================================================
 
+// Which served window carries a register ("input" = telemetry, "holding").
+static const char* windowName(uint16_t addr) {
+    for (size_t w = 0; w < tuya_codec::KNOWN_WINDOWS_COUNT; ++w) {
+        const auto& win = tuya_codec::KNOWN_WINDOWS[w];
+        if (addr >= win.reg_base && addr < win.reg_base + (win.field_b - win.prefix_len)) {
+            return win.field_a == 0 ? "input" : "holding";
+        }
+    }
+    return "unknown";
+}
+
 static esp_err_t handleGetRegisters(httpd_req_t* req) {
     // Check for ?addr= query parameter
     char query[32] = {};
@@ -243,26 +245,22 @@ static esp_err_t handleGetRegisters(httpd_req_t* req) {
             cJSON* json = cJSON_CreateObject();
             cJSON_AddNumberToObject(json, "addr", addr);
             cJSON_AddNumberToObject(json, "value", reg::get(addr));
-            cJSON_AddStringToObject(json, "type", reg::isHolding(addr) ? "holding" : "input");
+            cJSON_AddStringToObject(json, "type", windowName(addr));
             return sendJson(req, json);
         }
     }
 
-    // Return all registers
+    // Return all served registers, grouped by Tuya window.
     cJSON* json = cJSON_CreateObject();
-
-    cJSON* holding = cJSON_AddObjectToObject(json, "holding");
-    for (uint16_t a = reg::HOLDING_BASE; a <= reg::HOLDING_END; a++) {
-        char key[8];
-        snprintf(key, sizeof(key), "%u", a);
-        cJSON_AddNumberToObject(holding, key, reg::get(a));
-    }
-
-    cJSON* input = cJSON_AddObjectToObject(json, "input");
-    for (uint16_t a = reg::INPUT_BASE; a <= reg::INPUT_END; a++) {
-        char key[8];
-        snprintf(key, sizeof(key), "%u", a);
-        cJSON_AddNumberToObject(input, key, reg::get(a));
+    for (size_t w = 0; w < tuya_codec::KNOWN_WINDOWS_COUNT; ++w) {
+        const auto& win = tuya_codec::KNOWN_WINDOWS[w];
+        cJSON* grp = cJSON_AddObjectToObject(json, win.field_a == 0 ? "input" : "holding");
+        const uint16_t n = (uint16_t)(win.field_b - win.prefix_len);
+        for (uint16_t i = 0; i < n; i++) {
+            char key[8];
+            snprintf(key, sizeof(key), "%u", (unsigned)(win.reg_base + i));
+            cJSON_AddNumberToObject(grp, key, reg::get((uint16_t)(win.reg_base + i)));
+        }
     }
 
     return sendJson(req, json);
@@ -303,7 +301,6 @@ static esp_err_t handlePutRegister(httpd_req_t* req) {
     cJSON_Delete(json);
 
     reg::set(addr, value);
-    if (reg::isHolding(addr)) simulation::updateStatus();
     ESP_LOGI(TAG, "Set register %u = %u", addr, value);
 
     cJSON* resp = cJSON_CreateObject();
@@ -398,13 +395,7 @@ static esp_err_t handlePreset(httpd_req_t* req) {
 
     const char* n = name->valuestring;
     reg::Preset preset;
-    if      (strcmp(n, "idle") == 0)      preset = reg::Preset::IDLE;
-    else if (strcmp(n, "heating") == 0)   preset = reg::Preset::HEATING;
-    else if (strcmp(n, "cooling") == 0)   preset = reg::Preset::COOLING;
-    else if (strcmp(n, "hot_water") == 0) preset = reg::Preset::HOT_WATER;
-    else if (strcmp(n, "defrost") == 0)   preset = reg::Preset::DEFROST;
-    else if (strcmp(n, "fault_p01") == 0) preset = reg::Preset::FAULT_P01;
-    else {
+    if (!reg::presetFromKey(n, &preset)) {
         cJSON_Delete(json);
         return sendError(req, 400, "Unknown preset. Valid: idle, heating, cooling, hot_water, defrost, fault_p01");
     }
@@ -477,13 +468,24 @@ static esp_err_t handleGetCommands(httpd_req_t* req) {
     cJSON* arr = cJSON_AddArrayToObject(resp, "commands");
     for (size_t i = 0; i < n; ++i) {
         cJSON* c = cJSON_CreateObject();
-        char sel[8], val[8], raw[24];
+        char sel[8], val[8], raw[40], data[12];
         snprintf(sel, sizeof(sel), "0x%04X", recs[i].field_a);
         snprintf(val, sizeof(val), "0x%04X", recs[i].field_b);
-        snprintf(raw, sizeof(raw), "55AAF006%04X%04X", recs[i].field_a, recs[i].field_b);
+        int dp = 0;
+        data[0] = '\0';
+        for (uint8_t k = 0; k < recs[i].data_len && dp < (int)sizeof(data) - 2; ++k) {
+            dp += snprintf(data + dp, sizeof(data) - dp, "%02X", recs[i].data[k]);
+        }
+        snprintf(raw, sizeof(raw), "55AAF006%04X%04X%s", recs[i].field_a, recs[i].field_b, data);
         cJSON_AddStringToObject(c, "selector", sel);
         cJSON_AddStringToObject(c, "value", val);
         cJSON_AddNumberToObject(c, "value_dec", recs[i].field_b);
+        cJSON_AddNumberToObject(c, "wire_addr", recs[i].field_a);
+        cJSON* bytes = cJSON_AddArrayToObject(c, "data");
+        for (uint8_t k = 0; k < recs[i].data_len; ++k) {
+            cJSON_AddItemToArray(bytes, cJSON_CreateNumber(recs[i].data[k]));
+        }
+        cJSON_AddBoolToObject(c, "applied", recs[i].applied);
         cJSON_AddStringToObject(c, "frame", raw);
         cJSON_AddItemToArray(arr, c);
     }
@@ -592,31 +594,23 @@ static void streamTask(void* /*arg*/) {
             char line[512];
             int pos;
 
-            // Holding registers
-            pos = snprintf(line, sizeof(line),
-                "data: {\"t\":%lu,\"fc\":3,\"addr\":%u,\"count\":%u,\"values\":[",
-                (unsigned long)t_ms, (unsigned)reg::HOLDING_BASE,
-                (unsigned)reg::HOLDING_COUNT);
-            const uint16_t* hdata = reg::holdingData();
-            for (int i = 0; i < reg::HOLDING_COUNT && pos < (int)sizeof(line) - 10; i++) {
-                if (i > 0) line[pos++] = ',';
-                pos += snprintf(line + pos, sizeof(line) - pos, "%u", hdata[i]);
+            // One SSE line per served window (raw register values).
+            bool ok = true;
+            for (size_t w = 0; w < tuya_codec::KNOWN_WINDOWS_COUNT && ok; ++w) {
+                const auto& win = tuya_codec::KNOWN_WINDOWS[w];
+                const uint16_t n = (uint16_t)(win.field_b - win.prefix_len);
+                pos = snprintf(line, sizeof(line),
+                    "data: {\"t\":%lu,\"fc\":3,\"addr\":%u,\"count\":%u,\"values\":[",
+                    (unsigned long)t_ms, (unsigned)win.reg_base, (unsigned)n);
+                for (uint16_t i = 0; i < n && pos < (int)sizeof(line) - 10; i++) {
+                    if (i > 0) line[pos++] = ',';
+                    pos += snprintf(line + pos, sizeof(line) - pos, "%u",
+                                    reg::get((uint16_t)(win.reg_base + i)));
+                }
+                pos += snprintf(line + pos, sizeof(line) - pos, "]}\n\n");
+                ok = httpd_socket_send(hd, fd, line, (size_t)pos, 0) >= 0;
             }
-            pos += snprintf(line + pos, sizeof(line) - pos, "]}\n\n");
-            if (httpd_socket_send(hd, fd, line, (size_t)pos, 0) < 0) break;
-
-            // Input registers
-            pos = snprintf(line, sizeof(line),
-                "data: {\"t\":%lu,\"fc\":3,\"addr\":%u,\"count\":%u,\"values\":[",
-                (unsigned long)t_ms, (unsigned)reg::INPUT_BASE,
-                (unsigned)reg::INPUT_COUNT);
-            const uint16_t* idata = reg::inputData();
-            for (int i = 0; i < reg::INPUT_COUNT && pos < (int)sizeof(line) - 10; i++) {
-                if (i > 0) line[pos++] = ',';
-                pos += snprintf(line + pos, sizeof(line) - pos, "%u", idata[i]);
-            }
-            pos += snprintf(line + pos, sizeof(line) - pos, "]}\n\n");
-            if (httpd_socket_send(hd, fd, line, (size_t)pos, 0) < 0) break;
+            if (!ok) break;
 
             vTaskDelay(pdMS_TO_TICKS(500));
         }
@@ -701,7 +695,7 @@ static esp_err_t handleReboot(httpd_req_t* req) {
 
 static esp_err_t handleOptions(httpd_req_t* req) {
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, PUT, POST, PATCH, DELETE, OPTIONS");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
     httpd_resp_set_status(req, "204 No Content");
     httpd_resp_send(req, nullptr, 0);
@@ -718,7 +712,7 @@ esp_err_t start() {
     if (s_server) return ESP_OK;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 24;
+    config.max_uri_handlers = 24 + semantic_api::HANDLER_COUNT;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.stack_size = 8192;
 
@@ -755,9 +749,10 @@ esp_err_t start() {
     for (const auto& uri : uris) {
         httpd_register_uri_handler(s_server, &uri);
     }
+    const int sem = semantic_api::registerHandlers(s_server);
 
     ESP_LOGI(TAG, "HTTP server started on port %d (%d endpoints)",
-             config.server_port, (int)(sizeof(uris) / sizeof(uris[0])));
+             config.server_port, (int)(sizeof(uris) / sizeof(uris[0])) + sem);
     return ESP_OK;
 }
 

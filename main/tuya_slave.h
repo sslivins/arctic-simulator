@@ -42,8 +42,11 @@ struct Stats {
 // A decoded controller command (fc=0x06): field_a is the command selector,
 // field_b the value. e.g. power ON observed as {field_a=0xFFFF, field_b=0x0001}.
 struct CommandRec {
-    uint16_t field_a;
-    uint16_t field_b;
+    uint16_t field_a;     // wire address written
+    uint16_t field_b;     // byte count
+    uint8_t  data[4];     // first bytes written (data_len valid)
+    uint8_t  data_len;
+    bool     applied;     // library reflected it into the image
 };
 constexpr size_t COMMAND_RING_SZ = 16;
 

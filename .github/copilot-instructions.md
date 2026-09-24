@@ -51,11 +51,12 @@ stand-in for the real heat pump during development and integration testing of th
 | Path | Purpose |
 |------|---------|
 | `main/` | All application source code |
-| `main/register_map.h/cpp` | Register storage (holding 2000–2057, telemetry/input 2093–2142), presets |
+| `main/register_map.h/cpp` | Presets (named-field lists) + OEM-capture baseline seed; raw debug register passthrough |
 | `main/tuya_codec/` | Tuya MCU frame codec (parse, encode, checksum) |
-| `main/tuya_state.h/cpp` | Per-window byte store with mutex-guarded snapshots |
+| `main/tuya_state.h/cpp` | The single state store: one mutex-guarded `arctic::MaconImage` (`Access`, `decode`, `applyWrite`) |
 | `main/tuya_slave.h/cpp` | Tuya MCU wire-protocol slave over RS-485 |
-| `main/api_server.h/cpp` | REST API endpoints (register control, presets, playback) |
+| `main/api_server.h/cpp` | REST API endpoints (status, presets, raw registers, playback) |
+| `main/semantic_api.h/cpp` | Semantic REST API (`/api/fields`, `/api/state`, `/api/faults*`, `/api/lease`) built on arctic-macon |
 | `main/playback.h/cpp` | JSONL capture file parser and replay engine |
 | `main/wifi_manager.h/cpp` | WiFi STA mode + mDNS (arctic-sim.local) |
 | `main/main.cpp` | Entry point, FreeRTOS task creation |
@@ -81,7 +82,11 @@ stand-in for the real heat pump during development and integration testing of th
   and use `%lu`.
 - Namespaces: `reg::`, `tuya_slave::`, `api::`, `playback::`, `wifi::`
 - Register addresses use the protocol's native numbering (2000–2142), not zero-based
-  offsets. Conversion to array indices is internal to `register_map.cpp`.
+  offsets.
+- **Never add register numbers, bit masks or scalings to the simulator.** The
+  arctic-macon library (`components/arctic-macon`) is the single source of truth;
+  use `macon_fields.h` (named fields) / `macon_faults.h` and extend the library
+  if something is missing.
 
 ### REST API
 - All endpoints under `/api/`
@@ -172,7 +177,7 @@ Do **not** commit `sdkconfig` — it is in `.gitignore`.
 
 ## After Major Changes — Checklist
 
-- [ ] Keep register map in sync with `arctic-controller/docs/ARCTIC-MODBUS-PROTOCOL.md`
+- [ ] No register/bit knowledge outside arctic-macon (bump the submodule instead)
 - [ ] Update `README.md` if API endpoints or presets changed
 - [ ] Update example capture files if JSONL format changed
 - [ ] Re-gzip `index.html` if the dashboard was modified (see above)
