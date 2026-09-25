@@ -10,6 +10,7 @@
 #include "tuya_slave.h"
 #include "tuya_codec.h"
 #include "tuya_state.h"
+#include "macon_bus.h"
 
 #include <atomic>
 #include <cstring>
@@ -30,12 +31,37 @@ namespace {
 #if defined(ESP_PLATFORM)
 constexpr const char *TAG = "tuya_slv";
 
-// Match the sniffer's empirically-derived bus settings. The real Arctic
-// bus runs at 4800 baud, 8-O-1 (Odd parity gave the cleanest decode in
-// scope captures). Hard-coded for now; runtime tunables can come later.
-constexpr int               BAUD_RATE = 4800;
-constexpr uart_parity_t     PARITY    = UART_PARITY_ODD;
-constexpr uart_stop_bits_t  STOP      = UART_STOP_BITS_1;
+// Wire settings come from arctic-macon (MACON_BUS_PARAMS, 4800 8-E-1), the
+// same constants the controller's transport uses, so the two ends can never
+// disagree. (This used to hard-code 8-O-1 from early sniffer captures; the ESP32
+// UART still delivers bytes on a parity mismatch, so frames decoded fine while
+// uart_errors counted every one.)
+constexpr int BAUD_RATE = (int)arctic::MACON_BUS_PARAMS.baud;
+
+constexpr uart_word_length_t busDataBits() {
+    switch (arctic::MACON_BUS_PARAMS.data_bits) {
+        case 5:  return UART_DATA_5_BITS;
+        case 6:  return UART_DATA_6_BITS;
+        case 7:  return UART_DATA_7_BITS;
+        default: return UART_DATA_8_BITS;
+    }
+}
+constexpr uart_parity_t busParity() {
+    switch (arctic::MACON_BUS_PARAMS.parity) {
+        case arctic::MaconParity::Even: return UART_PARITY_EVEN;
+        case arctic::MaconParity::Odd:  return UART_PARITY_ODD;
+        default:                        return UART_PARITY_DISABLE;
+    }
+}
+constexpr char busParityChar() {
+    switch (arctic::MACON_BUS_PARAMS.parity) {
+        case arctic::MaconParity::Even: return 'E';
+        case arctic::MaconParity::Odd:  return 'O';
+        default:                        return 'N';
+    }
+}
+constexpr uart_stop_bits_t STOP =
+    (arctic::MACON_BUS_PARAMS.stop_bits == 2) ? UART_STOP_BITS_2 : UART_STOP_BITS_1;
 
 constexpr size_t MAX_BLOB        = 512;
 constexpr int    UART_BUF_SZ     = 512;
@@ -365,14 +391,15 @@ esp_err_t init() {
     tuya_state::init();
 
     const uart_port_t port = (uart_port_t)CONFIG_SIMULATOR_UART_PORT;
-    ESP_LOGI(TAG, "Init Tuya slave UART%d (%d baud 8-O-1, RX=%d TX=%d)",
-             port, BAUD_RATE,
+    ESP_LOGI(TAG, "Init Tuya slave UART%d (%d baud %d-%c-%d, RX=%d TX=%d)",
+             port, BAUD_RATE, (int)arctic::MACON_BUS_PARAMS.data_bits, busParityChar(),
+             (int)arctic::MACON_BUS_PARAMS.stop_bits,
              CONFIG_SIMULATOR_RS485_RX_PIN, CONFIG_SIMULATOR_RS485_TX_PIN);
 
     uart_config_t cfg = {};
     cfg.baud_rate  = BAUD_RATE;
-    cfg.data_bits  = UART_DATA_8_BITS;
-    cfg.parity     = PARITY;
+    cfg.data_bits  = busDataBits();
+    cfg.parity     = busParity();
     cfg.stop_bits  = STOP;
     cfg.flow_ctrl  = UART_HW_FLOWCTRL_DISABLE;
     cfg.source_clk = UART_SCLK_DEFAULT;
