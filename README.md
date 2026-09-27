@@ -73,7 +73,7 @@ consumer should refuse to run if they differ from its own.
 GET   /api/fields                # Catalog: every named field (kind, unit, range, step, enum keys)
 GET   /api/state                 # Current value of every named field, decoded operation, active faults
 PATCH /api/state                 # Atomic multi-field update (all-or-nothing, 400 with reason on reject)
-      Body: { "outlet_water_temp": 42, "pump_on": true, "working_mode": "floor_heating" }
+      Body: { "outlet_water_temp": 42, "pump_on": true, "working_mode": "heating" }
 GET   /api/heatpump              # Compact summary (decoded by the library)
 ```
 

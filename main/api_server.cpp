@@ -134,7 +134,7 @@ static esp_err_t handleGetHeatpump(httpd_req_t* req) {
 
     cJSON* sp = cJSON_AddObjectToObject(json, "setpoints");
     cJSON_AddNumberToObject(sp, "cooling", s.cooling_setpoint);
-    cJSON_AddNumberToObject(sp, "heating", s.aux_heat_setpoint);
+    cJSON_AddNumberToObject(sp, "heating", s.heating_setpoint);
     cJSON_AddNumberToObject(sp, "hot_water", s.hot_water_setpoint);
     cJSON_AddNumberToObject(sp, "hot_water_ceiling", s.hot_water_ceiling);
 

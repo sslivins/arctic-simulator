@@ -47,7 +47,7 @@ struct FieldValue { const char *name; int32_t value; };
 int s_rejects = 0;
 
 constexpr int32_t WM_COOLING   = static_cast<int32_t>(MaconWorkingMode::Cooling);
-constexpr int32_t WM_FLOOR     = static_cast<int32_t>(MaconWorkingMode::FloorHeating);
+constexpr int32_t WM_HEATING   = static_cast<int32_t>(MaconWorkingMode::Heating);
 constexpr int32_t WM_HOT_WATER = static_cast<int32_t>(MaconWorkingMode::HotWater);
 constexpr int32_t DIR_HEATING  = static_cast<int32_t>(MaconMode::Heating);
 constexpr int32_t DIR_COOLING  = static_cast<int32_t>(MaconMode::Cooling);
@@ -74,7 +74,7 @@ const FieldValue kHeating[] = {
     {"outlet_water_temp", 42}, {"discharge_temp", 75}, {"suction_temp", 3},
     {"outdoor_coil_temp", 2}, {"ipm_temp", 45}, {"primary_eev", 200},
     {"realtime_power", 2800}, {"ac_current", 12}, {"dc_voltage", 360}, {"fan_speed", 700},
-    {"working_mode", WM_FLOOR},
+    {"working_mode", WM_HEATING},
 };
 
 const FieldValue kCooling[] = {
@@ -98,7 +98,7 @@ const FieldValue kDefrost[] = {
     {"unit_on", 1}, {"compressor_icon", 1}, {"pump_on", 1}, {"defrost_on", 1},
     {"compressor_freq", 40}, {"outdoor_ambient_temp", -2}, {"inlet_water_temp", 30},
     {"outlet_water_temp", 28}, {"outdoor_coil_temp", -5}, {"discharge_temp", 50},
-    {"working_mode", WM_FLOOR},
+    {"working_mode", WM_HEATING},
 };
 
 const FieldValue kFaultP01[] = {

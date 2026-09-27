@@ -140,8 +140,8 @@ bool jsonToFieldValue(const MaconFieldDesc &d, const cJSON *v, int32_t *out,
             const MaconWorkingMode m = cJSON_IsString(v)
                 ? macon_working_mode_from_key(v->valuestring) : MaconWorkingMode::Unknown;
             if (m == MaconWorkingMode::Unknown) {
-                snprintf(why, why_len, "field '%s' needs one of cooling, floor_heating, "
-                         "fan_coil_heating, hot_water, auto", d.name);
+                snprintf(why, why_len, "field '%s' needs one of cooling, heating, mode_2, "
+                         "mode_3, mode_4, hot_water, hot_water_cooling", d.name);
                 return false;
             }
             *out = static_cast<int32_t>(m);
@@ -182,7 +182,10 @@ esp_err_t handleFields(httpd_req_t *req) {
             cJSON_AddNumberToObject(o, "step", d.step);
         } else if (d.kind == MaconFieldKind::WorkingMode) {
             cJSON *opt = cJSON_AddArrayToObject(o, "options");
-            for (const char *k : { "cooling", "floor_heating", "fan_coil_heating", "hot_water", "auto" })
+            // The simulator plays the unit, so every mode it can report is settable,
+            // including the ones a controller can't select (mode_2..mode_4).
+            for (const char *k : { "cooling", "heating", "mode_2", "mode_3", "mode_4",
+                                   "hot_water", "hot_water_cooling" })
                 cJSON_AddItemToArray(opt, cJSON_CreateString(k));
         } else if (d.kind == MaconFieldKind::OperatingDirection) {
             cJSON *opt = cJSON_AddArrayToObject(o, "options");

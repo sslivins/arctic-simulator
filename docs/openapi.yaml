@@ -518,9 +518,9 @@ components:
           example: true
         mode:
           type: string
-          enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto, unknown]
+          enum: [cooling, heating, mode_2, mode_3, mode_4, hot_water, hot_water_cooling, unknown]
           description: Current operating mode
-          example: floor_heating
+          example: heating
         mode_raw:
           type: integer
           description: Raw working mode register value
