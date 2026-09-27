@@ -106,7 +106,7 @@ void test_heating_preset_decodes() {
     CHECK_FIELD("pump_on", 1);
     CHECK_FIELD("fan_on", 1);
     CHECK_FIELD("realtime_power", 2800);
-    CHECK_FIELD("working_mode", (int32_t)MaconWorkingMode::FloorHeating);
+    CHECK_FIELD("working_mode", (int32_t)MaconWorkingMode::Heating);
     CHECK_FIELD("operating_direction", (int32_t)MaconMode::Heating);
     MaconState s{};
     tuya_state::decode(&s);
