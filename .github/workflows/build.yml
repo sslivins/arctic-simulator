@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'main/**'
+      - 'components/**'
       - 'tests/**'
       - 'CMakeLists.txt'
       - 'sdkconfig.defaults'
@@ -14,6 +15,7 @@ on:
     branches: [main]
     paths:
       - 'main/**'
+      - 'components/**'
       - 'tests/**'
       - 'CMakeLists.txt'
       - 'sdkconfig.defaults'
