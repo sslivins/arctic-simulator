@@ -22,7 +22,7 @@ Modbus RTU slave emulator for the Arctic ECO-600 heat pump, running on an M5Stac
 
 ### Prerequisites
 
-- ESP-IDF v5.4.x installed and sourced
+- ESP-IDF v6.1 installed and sourced
 - M5Stack Atom S3 connected via USB
 
 ### Build & Flash

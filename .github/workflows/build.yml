@@ -65,7 +65,7 @@ jobs:
       - name: ESP-IDF Build
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.4.3
+          esp_idf_version: v6.1
           target: esp32s3
           path: '.'
 
@@ -87,7 +87,7 @@ jobs:
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Target | esp32s3 |" >> $GITHUB_STEP_SUMMARY
-          echo "| ESP-IDF | v5.4.3 |" >> $GITHUB_STEP_SUMMARY
+          echo "| ESP-IDF | v6.1 |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
           echo "- \`arctic-simulator.bin\` — Main firmware" >> $GITHUB_STEP_SUMMARY

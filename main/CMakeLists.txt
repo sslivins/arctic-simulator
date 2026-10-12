@@ -67,7 +67,7 @@ idf_component_register(
         esp_wifi
         esp_netif
         nvs_flash
-        json
+        cjson
         esp_timer
         vfs
         lwip

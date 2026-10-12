@@ -23,7 +23,7 @@ esp_err_t status_led::init() {
     strip_cfg.strip_gpio_num    = CONFIG_SIMULATOR_STATUS_LED_GPIO;
     strip_cfg.max_leds          = 1;
     strip_cfg.led_model         = LED_MODEL_SK6812;
-    strip_cfg.led_pixel_format  = LED_PIXEL_FORMAT_GRB;
+    strip_cfg.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
     strip_cfg.flags.invert_out  = false;
 
     led_strip_rmt_config_t rmt_cfg = {};
