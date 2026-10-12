@@ -29,7 +29,7 @@ It runs on an **M5Stack Atom S3** (ESP32-S3) with an RS-485 adapter, acting as a
 stand-in for the real heat pump during development and integration testing of the
 [Arctic Controller](https://github.com/sslivins/arctic-controller).
 
-- **Framework**: ESP-IDF v5.4.3
+- **Framework**: ESP-IDF v6.1
 - **Target**: ESP32-S3 (M5Stack Atom S3 / Atom S3R)
 - **Language**: C++
 - **Communication**: Modbus RTU slave at 2400 baud, 8-Even-1, RS-485 half-duplex
@@ -127,7 +127,7 @@ Default GPIO pins for Atom S3 + RS485 base (adjust via menuconfig):
 
 ## CI / Build
 
-- **CI workflow**: `.github/workflows/build.yml` builds in `espressif/idf:v5.4.3`
+- **CI workflow**: `.github/workflows/build.yml` builds in `espressif/idf:v6.1`
   container with target `esp32s3`
 - **Path filters**: Only `main/`, `CMakeLists.txt`, `sdkconfig.defaults`,
   `partitions.csv`, and workflow files trigger builds

@@ -24,7 +24,7 @@
 #include "esp_lcd_panel_vendor.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -462,8 +462,8 @@ esp_err_t init() {
     // ── LCD panel IO (SPI) ─────────────────────────────────────────────
     esp_lcd_panel_io_handle_t io_handle = nullptr;
     esp_lcd_panel_io_spi_config_t io_cfg = {};
-    io_cfg.dc_gpio_num      = CONFIG_SIMULATOR_LCD_DC;
-    io_cfg.cs_gpio_num      = CONFIG_SIMULATOR_LCD_CS;
+    io_cfg.dc_gpio_num      = (gpio_num_t)CONFIG_SIMULATOR_LCD_DC;
+    io_cfg.cs_gpio_num      = (gpio_num_t)CONFIG_SIMULATOR_LCD_CS;
     io_cfg.pclk_hz          = 40 * 1000 * 1000;  // 40 MHz (matches M5GFX)
     io_cfg.lcd_cmd_bits     = 8;
     io_cfg.lcd_param_bits   = 8;
@@ -480,7 +480,7 @@ esp_err_t init() {
 
     // ── ST7789 panel (structural wrapper for draw_bitmap / set_gap) ────
     esp_lcd_panel_dev_config_t panel_cfg = {};
-    panel_cfg.reset_gpio_num  = CONFIG_SIMULATOR_LCD_RST;
+    panel_cfg.reset_gpio_num  = (gpio_num_t)CONFIG_SIMULATOR_LCD_RST;
     panel_cfg.rgb_ele_order   = LCD_RGB_ELEMENT_ORDER_BGR;
     panel_cfg.bits_per_pixel  = 16;
 
@@ -574,22 +574,27 @@ esp_err_t init() {
         bool bl_ok = false;
 #ifdef CONFIG_SIMULATOR_LCD_BL_I2C
         // I2C backlight (Atom S3R)
-        i2c_config_t i2c_cfg = {};
-        i2c_cfg.mode             = I2C_MODE_MASTER;
-        i2c_cfg.sda_io_num       = (gpio_num_t)CONFIG_SIMULATOR_LCD_BL_I2C_SDA;
-        i2c_cfg.scl_io_num       = (gpio_num_t)CONFIG_SIMULATOR_LCD_BL_I2C_SCL;
-        i2c_cfg.sda_pullup_en    = GPIO_PULLUP_ENABLE;
-        i2c_cfg.scl_pullup_en    = GPIO_PULLUP_ENABLE;
-        i2c_cfg.master.clk_speed = 400000;
+        i2c_master_bus_config_t bus_cfg = {};
+        bus_cfg.i2c_port          = I2C_NUM_1;
+        bus_cfg.sda_io_num        = (gpio_num_t)CONFIG_SIMULATOR_LCD_BL_I2C_SDA;
+        bus_cfg.scl_io_num        = (gpio_num_t)CONFIG_SIMULATOR_LCD_BL_I2C_SCL;
+        bus_cfg.clk_source        = I2C_CLK_SRC_DEFAULT;
+        bus_cfg.glitch_ignore_cnt = 7;
+        bus_cfg.flags.enable_internal_pullup = true;
 
-        if (i2c_param_config(I2C_NUM_1, &i2c_cfg) == ESP_OK &&
-            i2c_driver_install(I2C_NUM_1, I2C_MODE_MASTER, 0, 0, 0) == ESP_OK)
+        i2c_device_config_t dev_cfg = {};
+        dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        dev_cfg.device_address  = 0x30;
+        dev_cfg.scl_speed_hz    = 400000;
+
+        i2c_master_bus_handle_t bl_bus = nullptr;
+        i2c_master_dev_handle_t bl_dev = nullptr;
+        if (i2c_new_master_bus(&bus_cfg, &bl_bus) == ESP_OK &&
+            i2c_master_bus_add_device(bl_bus, &dev_cfg, &bl_dev) == ESP_OK)
         {
-            auto bl_reg = [](uint8_t reg, uint8_t val) -> esp_err_t {
+            auto bl_reg = [bl_dev](uint8_t reg, uint8_t val) -> esp_err_t {
                 uint8_t buf[2] = { reg, val };
-                return i2c_master_write_to_device(I2C_NUM_1, 0x30,
-                                                  buf, sizeof(buf),
-                                                  pdMS_TO_TICKS(100));
+                return i2c_master_transmit(bl_dev, buf, sizeof(buf), 100);
             };
             bl_reg(0x00, 0x40);              // soft reset
             vTaskDelay(pdMS_TO_TICKS(2));
