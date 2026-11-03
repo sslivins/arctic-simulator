@@ -164,6 +164,7 @@ static esp_err_t handleGetHeatpump(httpd_req_t* req) {
     cJSON_AddBoolToObject(periph, "fan", s.fan_on);
     cJSON_AddBoolToObject(periph, "defrost", s.defrost_on);
     cJSON_AddNumberToObject(periph, "main_eev", s.primary_eev);
+    cJSON_AddNumberToObject(periph, "aux_eev", s.aux_eev);
     cJSON_AddNumberToObject(periph, "fan_speed", s.fan_level);
 
     semantic_api::addActiveFaults(json, "faults");

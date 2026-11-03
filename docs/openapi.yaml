@@ -649,11 +649,11 @@ components:
               example: false
             primary_eev:
               type: integer
-              description: Primary EEV opening in steps
-              example: 200
+              description: Main EEV opening (OEM A5) in steps; unit unconfirmed (see arctic-macon REGISTERS.md)
+              example: 18
             secondary_eev:
               type: integer
-              description: Secondary EEV opening in steps
+              description: Auxiliary/EVI EEV opening (OEM o6) in steps; unit unconfirmed
               example: 0
             defrost:
               type: boolean
