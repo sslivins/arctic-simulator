@@ -59,7 +59,7 @@ const FieldValue kCommon[] = {
     {"unit_on", 1}, {"fan_on", 0}, {"pump_on", 0}, {"cooling_on", 0},
     {"defrost_on", 0}, {"compressor_icon", 0},
     {"compressor_freq", 0}, {"fan_speed", 0}, {"realtime_power", 0},
-    {"ac_voltage", 230}, {"ac_current", 0}, {"dc_voltage", 320}, {"primary_eev", 17}, {"aux_eev", 0},
+    {"ac_voltage", 230}, {"ac_current", 0}, {"dc_voltage", 320}, {"primary_eev", 170}, {"aux_eev", 0},
     {"outdoor_ambient_temp", 20}, {"inlet_water_temp", 25}, {"outlet_water_temp", 25},
     {"water_tank_temp", 45}, {"discharge_temp", 25}, {"suction_temp", 20},
     {"outdoor_coil_temp", 20}, {"indoor_coil_temp", 20}, {"ipm_temp", 20},
@@ -72,7 +72,7 @@ const FieldValue kHeating[] = {
     {"unit_on", 1}, {"compressor_icon", 1}, {"pump_on", 1}, {"fan_on", 1},
     {"compressor_freq", 50}, {"outdoor_ambient_temp", 5}, {"inlet_water_temp", 35},
     {"outlet_water_temp", 42}, {"discharge_temp", 75}, {"suction_temp", 3},
-    {"outdoor_coil_temp", 2}, {"ipm_temp", 45}, {"primary_eev", 18}, {"aux_eev", 12},
+    {"outdoor_coil_temp", 2}, {"ipm_temp", 45}, {"primary_eev", 180}, {"aux_eev", 120},
     {"realtime_power", 2800}, {"ac_current", 12}, {"dc_voltage", 360}, {"fan_speed", 700},
     {"working_mode", WM_HEATING},
 };
@@ -81,7 +81,7 @@ const FieldValue kCooling[] = {
     {"unit_on", 1}, {"compressor_icon", 1}, {"pump_on", 1}, {"fan_on", 1}, {"cooling_on", 1},
     {"compressor_freq", 60}, {"outdoor_ambient_temp", 35}, {"inlet_water_temp", 12},
     {"outlet_water_temp", 8}, {"discharge_temp", 65}, {"suction_temp", 5},
-    {"indoor_coil_temp", 6}, {"ipm_temp", 50}, {"primary_eev", 48},
+    {"indoor_coil_temp", 6}, {"ipm_temp", 50}, {"primary_eev", 480},
     {"realtime_power", 3000}, {"ac_current", 13}, {"dc_voltage", 360}, {"fan_speed", 800},
     {"working_mode", WM_COOLING}, {"operating_direction", DIR_COOLING},
 };
