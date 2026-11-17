@@ -210,111 +210,116 @@ If the master does not receive a response within 200ms, it resends the request. 
 
 ## Register Map
 
-### Holding Registers (Read/Write) - Addresses 2000-2099
+Registers are identified by their arctic-macon wire byte offset `@N` (the
+library's `addr`; see `components/arctic-macon/docs/REGISTERS.md`). The OEM
+manual's Modbus register numbering is not used. Telemetry is served at
+@0-@49 and holding at @50-@107.
 
-| Address | Function Code | Description | Data Type | Range | Notes |
+### Holding Registers (Read/Write) - Offsets @50-@142
+
+| Offset | Function Code | Description | Data Type | Range | Notes |
 |---------|---------------|-------------|-----------|-------|-------|
-| 2000 | 03/06/16 | Unit ON/OFF setting | UINT16 | 0-1 | 0=OFF, 1=ON |
-| 2001 | 03/06/16 | Working mode setting | UINT16 | 0,1,2,5,6 | 0=Cooling, 1=Floor heating, 2=Fan coil heating, 5=Hot water, 6=Auto (3,4 unused) |
-| 2002 | 03/06/16 | Cooling temperature setting | UINT16 | | |
-| 2003 | 03/06/16 | Heating temperature setting | UINT16 | | |
-| 2004 | 03/06/16 | Hot water temperature setting | UINT16 | | |
-| 2005 | 03/06/16 | Fan coil cooling ΔT | UINT16 | | |
-| 2006 | 03/06/16 | Underfloor heating ΔT | UINT16 | | |
-| 2007 | 03/06/16 | Hot water tank ΔT | UINT16 | | |
-| 2008 | 03/06/16 | Fan coil heating ΔT | UINT16 | | |
-| 2009 | 03/06/16 | (P1) Main EEV initial opening setting | UINT16 | 0-500 | |
-| 2010 | 03/06/16 | (P2) | UINT16 | | |
-| 2011 | 03/06/16 | (P3) | UINT16 | | |
-| 2012 | 03/06/16 | (P4) | UINT16 | | |
-| 2013 | 03/06/16 | (P5) Sterilizing time setting | UINT16 | | |
-| 2014 | 03/06/16 | (P6) | UINT16 | | |
-| 2015 | 03/06/16 | (P7) | UINT16 | | |
-| 2016 | 03/06/16 | (P8) | UINT16 | | |
-| 2017 | 03/06/16 | (P9) | UINT16 | | |
-| 2018 | 03/06/16 | (P10) | UINT16 | | |
-| 2019 | 03/06/16 | (P11) | UINT16 | | |
-| 2020 | 03/06/16 | (P12) | UINT16 | | |
-| 2021 | 03/06/16 | (P13) Maximum setting temperature | UINT16 | | |
-| 2022 | 03/06/16 | (P14) | UINT16 | | |
-| 2023 | 03/06/16 | (P15) | UINT16 | | |
-| 2024 | 03/06/16 | (P16) | UINT16 | | |
-| 2025 | 03/06/16 | (P17) | UINT16 | | |
-| 2026 | 03/06/16 | (P18) | UINT16 | | |
-| 2027 | 03/06/16 | (P19) | UINT16 | | |
-| 2028 | 03/06/16 | (P20) | UINT16 | | |
-| 2029 | 03/06/16 | (P21) | UINT16 | | |
-| 2030 | 03/06/16 | (P22) | UINT16 | | |
-| 2031 | 03/06/16 | (P23) Cooling ambient temp setting for auto mode | UINT16 | | |
-| 2032 | 03/06/16 | (P24) Heating ambient temp setting for auto mode | UINT16 | | |
-| 2033 | 03/06/16 | (P25) | UINT16 | | |
-| 2034 | 03/06/16 | (P26) | UINT16 | | |
-| 2035 | 03/06/16 | (P27) | UINT16 | | |
-| 2036 | 03/06/16 | (P28) Mode switch delay under auto mode | UINT16 | | |
-| 2037 | 03/06/16 | (P29) Defrost cycle | UINT16 | | |
-| 2038 | 03/06/16 | (P30) Coil temp to enter defrost mode | UINT16 | | |
-| 2039 | 03/06/16 | (P31) Ambient temp to extend defrost time | UINT16 | | |
-| 2040 | 03/06/16 | (P32) Ambient-coil temp diff to enter defrost | UINT16 | | |
-| 2041 | 03/06/16 | (P33) Extend defrost cycle time setting | UINT16 | | |
-| 2042 | 03/06/16 | (P34) Maximum defrost time | UINT16 | | |
-| 2043 | 03/06/16 | (P35) Coil temp to exit defrost mode | UINT16 | | |
-| 2044 | 03/06/16 | (P36) Water return cycle temp setting | UINT16 | | |
-| 2045 | 03/06/16 | (P37) Water return cycle time setting | UINT16 | | |
-| 2046 | 03/06/16 | (P38) Low ambient temp protection setting | UINT16 | | |
-| 2047 | 03/06/16 | (P39) Freq reduction near target temp | UINT16 | | |
-| 2048 | 03/06/16 | (P40) Cooling low ambient temp protection | UINT16 | | |
-| 2049 | 03/06/16 | (P41) Main EEV superheat control selection | UINT16 | | 0=Superheat adjustment, 1=Fixed-point adjustment |
-| 2050 | 03/06/16 | (P42) Main EEV target superheat degree | UINT16 | | |
-| 2051 | 03/06/16 | (P43) 3-way valve 2 switching time | UINT16 | | |
-| 2052 | 03/06/16 | (P44) Water pump mode after reaching target temp | UINT16 | | 0=ON/OFF per P45, 1=Keep OFF, 2=Keep ON |
-| 2053 | 03/06/16 | (P45) Water pump running interval | UINT16 | | |
-| 2054 | 03/06/16 | (P46) Low ambient temp to turn on pump in standby | UINT16 | | |
-| 2055 | 03/06/16 | (P47) Waterway cleaning function selection | UINT16 | | 0=OFF, 1=Pump ON, 2=Pump+3WV1, 3=Pump+3WV1+3WV2 |
-| 2056 | 03/06/16 | Accept frequency control from host unit | UINT16 | 0-1 | 0=NO, 1=YES |
-| 2057 | 03/06/16 | Host unit compressor frequency setting | UINT16 | 0-120 | |
-| 2058-2099 | | Reserved | | | |
+| @50 | 03/06/16 | Unit ON/OFF setting | UINT16 | 0-1 | 0=OFF, 1=ON |
+| @51 | 03/06/16 | Working mode setting | UINT16 | 0,1,2,5,6 | 0=Cooling, 1=Floor heating, 2=Fan coil heating, 5=Hot water, 6=Auto (3,4 unused) |
+| @52 | 03/06/16 | Cooling temperature setting | UINT16 | | |
+| @53 | 03/06/16 | Heating temperature setting | UINT16 | | |
+| @54 | 03/06/16 | Hot water temperature setting | UINT16 | | |
+| @55 | 03/06/16 | Fan coil cooling ΔT | UINT16 | | |
+| @56 | 03/06/16 | Underfloor heating ΔT | UINT16 | | |
+| @57 | 03/06/16 | Hot water tank ΔT | UINT16 | | |
+| @58 | 03/06/16 | Fan coil heating ΔT | UINT16 | | |
+| @59 | 03/06/16 | (P1) Main EEV initial opening setting | UINT16 | 0-500 | |
+| @60 | 03/06/16 | (P2) | UINT16 | | |
+| @61 | 03/06/16 | (P3) | UINT16 | | |
+| @62 | 03/06/16 | (P4) | UINT16 | | |
+| @63 | 03/06/16 | (P5) Sterilizing time setting | UINT16 | | |
+| @64 | 03/06/16 | (P6) | UINT16 | | |
+| @65 | 03/06/16 | (P7) | UINT16 | | |
+| @66 | 03/06/16 | (P8) | UINT16 | | |
+| @67 | 03/06/16 | (P9) | UINT16 | | |
+| @68 | 03/06/16 | (P10) | UINT16 | | |
+| @69 | 03/06/16 | (P11) | UINT16 | | |
+| @70 | 03/06/16 | (P12) | UINT16 | | |
+| @71 | 03/06/16 | (P13) Maximum setting temperature | UINT16 | | |
+| @72 | 03/06/16 | (P14) | UINT16 | | |
+| @73 | 03/06/16 | (P15) | UINT16 | | |
+| @74 | 03/06/16 | (P16) | UINT16 | | |
+| @75 | 03/06/16 | (P17) | UINT16 | | |
+| @76 | 03/06/16 | (P18) | UINT16 | | |
+| @77 | 03/06/16 | (P19) | UINT16 | | |
+| @78 | 03/06/16 | (P20) | UINT16 | | |
+| @79 | 03/06/16 | (P21) | UINT16 | | |
+| @80 | 03/06/16 | (P22) | UINT16 | | |
+| @81 | 03/06/16 | (P23) Cooling ambient temp setting for auto mode | UINT16 | | |
+| @82 | 03/06/16 | (P24) Heating ambient temp setting for auto mode | UINT16 | | |
+| @83 | 03/06/16 | (P25) | UINT16 | | |
+| @84 | 03/06/16 | (P26) | UINT16 | | |
+| @85 | 03/06/16 | (P27) | UINT16 | | |
+| @86 | 03/06/16 | (P28) Mode switch delay under auto mode | UINT16 | | |
+| @87 | 03/06/16 | (P29) Defrost cycle | UINT16 | | |
+| @88 | 03/06/16 | (P30) Coil temp to enter defrost mode | UINT16 | | |
+| @89 | 03/06/16 | (P31) Ambient temp to extend defrost time | UINT16 | | |
+| @90 | 03/06/16 | (P32) Ambient-coil temp diff to enter defrost | UINT16 | | |
+| @91 | 03/06/16 | (P33) Extend defrost cycle time setting | UINT16 | | |
+| @92 | 03/06/16 | (P34) Maximum defrost time | UINT16 | | |
+| @93 | 03/06/16 | (P35) Coil temp to exit defrost mode | UINT16 | | |
+| @94 | 03/06/16 | (P36) Water return cycle temp setting | UINT16 | | |
+| @95 | 03/06/16 | (P37) Water return cycle time setting | UINT16 | | |
+| @96 | 03/06/16 | (P38) Low ambient temp protection setting | UINT16 | | |
+| @97 | 03/06/16 | (P39) Freq reduction near target temp | UINT16 | | |
+| @98 | 03/06/16 | (P40) Cooling low ambient temp protection | UINT16 | | |
+| @99 | 03/06/16 | (P41) Main EEV superheat control selection | UINT16 | | 0=Superheat adjustment, 1=Fixed-point adjustment |
+| @100 | 03/06/16 | (P42) Main EEV target superheat degree | UINT16 | | |
+| @101 | 03/06/16 | (P43) 3-way valve 2 switching time | UINT16 | | |
+| @102 | 03/06/16 | (P44) Water pump mode after reaching target temp | UINT16 | | 0=ON/OFF per P45, 1=Keep OFF, 2=Keep ON |
+| @103 | 03/06/16 | (P45) Water pump running interval | UINT16 | | |
+| @104 | 03/06/16 | (P46) Low ambient temp to turn on pump in standby | UINT16 | | |
+| @105 | 03/06/16 | (P47) Waterway cleaning function selection | UINT16 | | 0=OFF, 1=Pump ON, 2=Pump+3WV1, 3=Pump+3WV1+3WV2 |
+| @106 | 03/06/16 | Accept frequency control from host unit | UINT16 | 0-1 | 0=NO, 1=YES |
+| @107 | 03/06/16 | Host unit compressor frequency setting | UINT16 | 0-120 | |
+| @108-@142 | | Reserved | | | |
 
-### Input Registers (Read-Only) - Addresses 2100-2138
+### Input Registers (Read-Only) - Offsets @7-@45
 
-#### Temperature & Sensor Registers (2100-2132)
+#### Temperature & Sensor Registers (@7-@39)
 
-| Address | Description | Data Type | Notes |
+| Offset | Description | Data Type | Notes |
 |---------|-------------|-----------|-------|
-| 2100 | Water tank temperature | UINT16 | |
-| 2101 | Reserved | UINT16 | |
-| 2102 | Outlet water temperature | UINT16 | |
-| 2103 | Inlet water temperature | UINT16 | |
-| 2104 | Discharge temperature | UINT16 | |
-| 2105 | Suction temperature | UINT16 | |
-| 2106 | Reserved (EVI suction temperature) | UINT16 | |
-| 2107 | External coil temperature | UINT16 | |
-| 2108 | Cooling coil temperature | UINT16 | |
-| 2109 | Reserved (Indoor temperature) | UINT16 | |
-| 2110 | Outdoor ambient temperature | UINT16 | |
-| 2111 | Reserved (High pressure saturation temp) | UINT16 | |
-| 2112 | Reserved (Primary circuit low pressure saturation temp) | UINT16 | |
-| 2113 | Reserved (Secondary low pressure saturation temp) | UINT16 | |
-| 2114 | IPM temperature | UINT16 | |
-| 2115 | Brine side inlet water temperature | UINT16 | |
-| 2116 | Brine side outlet water temperature | UINT16 | |
-| 2117 | Reserved temperature 3 | UINT16 | |
-| 2118 | Compressor running frequency | UINT16 | |
-| 2119 | DC fan motor speed | UINT16 | |
-| 2120 | AC voltage | UINT16 | V |
-| 2121 | AC current | UINT16 | A |
-| 2122 | DC voltage | UINT16 | ÷10 for actual V |
-| 2123 | Compressor phase current | UINT16 | A |
-| 2124 | Primary EEV opening | UINT16 | steps |
-| 2125 | Secondary EEV opening | UINT16 | steps |
-| 2126 | High pressure | UINT16 | ÷100 for MPa |
-| 2127 | Low pressure | UINT16 | ÷100 for MPa |
-| 2128 | EE coding | UINT16 | |
-| 2129 | Reserved | UINT16 | |
-| 2130 | Reserved | UINT16 | |
-| 2131 | Reserved | UINT16 | |
-| 2132 | Reserved | UINT16 | |
+| @7 | Water tank temperature | UINT16 | |
+| @8 | Reserved | UINT16 | |
+| @9 | Outlet water temperature | UINT16 | |
+| @10 | Inlet water temperature | UINT16 | |
+| @11 | Discharge temperature | UINT16 | |
+| @12 | Suction temperature | UINT16 | |
+| @13 | Reserved (EVI suction temperature) | UINT16 | |
+| @14 | External coil temperature | UINT16 | |
+| @15 | Cooling coil temperature | UINT16 | |
+| @16 | Reserved (Indoor temperature) | UINT16 | |
+| @17 | Outdoor ambient temperature | UINT16 | |
+| @18 | Reserved (High pressure saturation temp) | UINT16 | |
+| @19 | Reserved (Primary circuit low pressure saturation temp) | UINT16 | |
+| @20 | Reserved (Secondary low pressure saturation temp) | UINT16 | |
+| @21 | IPM temperature | UINT16 | |
+| @22 | Brine side inlet water temperature | UINT16 | |
+| @23 | Brine side outlet water temperature | UINT16 | |
+| @24 | Reserved temperature 3 | UINT16 | |
+| @25 | Compressor running frequency | UINT16 | |
+| @26 | DC fan motor speed | UINT16 | |
+| @27 | AC voltage | UINT16 | V |
+| @28 | AC current | UINT16 | A |
+| @29 | DC voltage | UINT16 | ÷10 for actual V |
+| @30 | Compressor phase current | UINT16 | A |
+| @31 | Primary EEV opening | UINT16 | steps |
+| @32 | Secondary EEV opening | UINT16 | steps |
+| @33 | High pressure | UINT16 | ÷100 for MPa |
+| @34 | Low pressure | UINT16 | ÷100 for MPa |
+| @35 | EE coding | UINT16 | |
+| @36 | Reserved | UINT16 | |
+| @37 | Reserved | UINT16 | |
+| @38 | Reserved | UINT16 | |
+| @39 | Reserved | UINT16 | |
 
-#### Status Register 2133 - System Working Status 1
+#### Status Register @40 - System Working Status 1
 
 | Bit | Description |
 |-----|-------------|
@@ -322,7 +327,7 @@ If the master does not receive a response within 200ms, it resends the request. 
 | 1 | Frequency reaches lower limit |
 | 2-15 | Reserved |
 
-#### Status Register 2134 - Error Code 1
+#### Status Register @41 - Error Code 1
 
 | Bit | Description |
 |-----|-------------|
@@ -332,7 +337,7 @@ If the master does not receive a response within 200ms, it resends the request. 
 | 3 | Water tank temperature sensor error |
 | 4-15 | Reserved |
 
-#### Status Register 2135 - System Working Status 2
+#### Status Register @42 - System Working Status 2
 
 | Bit | Description |
 |-----|-------------|
@@ -353,7 +358,7 @@ If the master does not receive a response within 200ms, it resends the request. 
 | 14 | 3-way valve 2 |
 | 15 | Brine side water flow switch |
 
-#### Status Register 2136 - System Working Status 3
+#### Status Register @43 - System Working Status 3
 
 | Bit | Description |
 |-----|-------------|
@@ -374,7 +379,7 @@ If the master does not receive a response within 200ms, it resends the request. 
 | 14 | Remote ON/OFF switch for heating/cooling mode |
 | 15 | Reserved |
 
-#### Status Register 2137 - Error Code 2
+#### Status Register @44 - Error Code 2
 
 | Bit | Description |
 |-----|-------------|
@@ -395,7 +400,7 @@ If the master does not receive a response within 200ms, it resends the request. 
 | 14 | High outlet water temperature protection |
 | 15 | AC voltage protection |
 
-#### Status Register 2138 - Error Code 3
+#### Status Register @45 - Error Code 3
 
 | Bit | Description |
 |-----|-------------|
@@ -422,22 +427,22 @@ If the master does not receive a response within 200ms, it resends the request. 
 
 ### Key Registers for Basic Operation
 
-| Address | Description | Read/Write |
+| Offset | Description | Read/Write |
 |---------|-------------|------------|
-| 2000 | Unit ON/OFF | R/W |
-| 2001 | Working Mode | R/W |
-| 2002 | Cooling Setpoint | R/W |
-| 2003 | Heating Setpoint | R/W |
-| 2004 | Hot Water Setpoint | R/W |
-| 2102 | Outlet Water Temp | R |
-| 2103 | Inlet Water Temp | R |
-| 2110 | Outdoor Ambient Temp | R |
-| 2118 | Compressor Frequency | R |
-| 2135 | System Status | R |
-| 2137 | Error Code | R |
-| 2138 | Protection Status | R |
+| @50 | Unit ON/OFF | R/W |
+| @51 | Working Mode | R/W |
+| @52 | Cooling Setpoint | R/W |
+| @53 | Heating Setpoint | R/W |
+| @54 | Hot Water Setpoint | R/W |
+| @9 | Outlet Water Temp | R |
+| @10 | Inlet Water Temp | R |
+| @17 | Outdoor Ambient Temp | R |
+| @25 | Compressor Frequency | R |
+| @42 | System Status | R |
+| @44 | Error Code | R |
+| @45 | Protection Status | R |
 
-### Working Modes (Register 2001)
+### Working Modes (Register @51)
 
 | Value | Mode |
 |-------|------|
@@ -451,71 +456,71 @@ If the master does not receive a response within 200ms, it resends the request. 
 
 ## Error Codes Reference
 
-The heat pump displays error codes on the wired controller. These codes map to specific bits in the error registers (2134, 2137, 2138).
+The heat pump displays error codes on the wired controller. These codes map to specific bits in the error registers (@41, @44, @45).
 
 ### Sensor Errors (E-Series)
 
 | Code | Description | Register | Bit | Resolution |
 |------|-------------|----------|-----|------------|
-| E01 | Compressor discharge temperature sensor fault | 2137 | 6 | Check if the compressor discharge temperature sensor for short or open circuit and correct or replace. |
-| E05 | Heat pump coil temperature sensor fault | 2137 | 5 | Check the heat pump coil temperature sensor and wires for a short or open circuit and correct or replace sensors. |
-| E09 | Compressor suction temperature sensor fault | 2137 | 7 | Check if the compressor suction temperature sensor for short or open circuit and correct or replace. |
-| E13 | Cooling coil temperature sensor fault | 2137 | 4 | Check the coil temperature sensor for a short or open circuit and correct or replace. |
-| E18 | Outlet water temperature sensor fault | 2137 | 3 | Check the outlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace. |
-| E19 | Inlet water temperature sensor fault | 2137 | 2 | Check the inlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace. |
-| E20 | Water tank temperature sensor fault | 2134 | 3 | Check if the hot water tank temperature sensor or wires have a short or open circuit. Correct or replace. |
-| E21 | Wired controller communication fault | 2137 | 10 | Check the wired controller's cable and its connections. |
-| E22 | Outdoor ambient temperature sensor fault | 2137 | 8 | Check if the ambient temperature sensor for the heat pump or its wiring has a short or open circuit and correct or replace. |
-| E28 | Outdoor EEPROM fault | 2137 | 1 | Contact the dealer. |
-| E33 | High pressure sensor fault | 2138 | 6 | Compressor high pressure switch or wiring faulty. Correct or replace. |
-| E34 | EEV return sensor fault | 2137 | 7 | Check if the suction temperature sensor short circuit or disconnect. |
+| E01 | Compressor discharge temperature sensor fault | @44 | 6 | Check if the compressor discharge temperature sensor for short or open circuit and correct or replace. |
+| E05 | Heat pump coil temperature sensor fault | @44 | 5 | Check the heat pump coil temperature sensor and wires for a short or open circuit and correct or replace sensors. |
+| E09 | Compressor suction temperature sensor fault | @44 | 7 | Check if the compressor suction temperature sensor for short or open circuit and correct or replace. |
+| E13 | Cooling coil temperature sensor fault | @44 | 4 | Check the coil temperature sensor for a short or open circuit and correct or replace. |
+| E18 | Outlet water temperature sensor fault | @44 | 3 | Check the outlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace. |
+| E19 | Inlet water temperature sensor fault | @44 | 2 | Check the inlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace. |
+| E20 | Water tank temperature sensor fault | @41 | 3 | Check if the hot water tank temperature sensor or wires have a short or open circuit. Correct or replace. |
+| E21 | Wired controller communication fault | @44 | 10 | Check the wired controller's cable and its connections. |
+| E22 | Outdoor ambient temperature sensor fault | @44 | 8 | Check if the ambient temperature sensor for the heat pump or its wiring has a short or open circuit and correct or replace. |
+| E28 | Outdoor EEPROM fault | @44 | 1 | Contact the dealer. |
+| E33 | High pressure sensor fault | @45 | 6 | Compressor high pressure switch or wiring faulty. Correct or replace. |
+| E34 | EEV return sensor fault | @44 | 7 | Check if the suction temperature sensor short circuit or disconnect. |
 
 ### Protection Errors (P-Series)
 
 | Code | Description | Register | Bit | Resolution |
 |------|-------------|----------|-----|------------|
-| P01 | Water flow switch protection | 2138 | 8 | Flow is too low or wiring is open circuit. Check the water system, water pump, and operation of water flow switch and correct problem. |
-| P02 | High pressure protection activated | 2138 | 6 | 1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked or if evaporator fins are blocked impacting heat transfer efficiency. 3) Check whether snow or ice has built up too much inside the unit. 4) Check that the water tank temperature setting is not too high. |
-| P06 | Low pressure protection activated | 2138 | 7 | 1) Check whether the unit is leaking refrigerant. 2) Repair and vacuum system, then refill with exact amount of refrigerant as per nameplate. |
-| P11 | Compressor discharge temperature too high | 2138 | 5 | 1) Check water system is operating normal, look for reduction in normal water flow. 2) Check whether there was a refrigerant leak and repair. 3) Verify unit is in normal operation with proper exhaust temperature and system pressure. |
-| P15 | Inlet/outlet temperature difference too large | 2138 | 13 | 1) Check if water system is operating abnormally, such as water flow is too low. 2) Verify unit is in normal operation with proper exhaust temperature and system pressure. |
-| P16 | Outlet water temperature too low protection | 2138 | 14 | 1) Check water system is normal and water flow is adequate. 2) Verify unit is in normal operation with proper exhaust temperature and system pressure. |
-| P19 | AC current protection | 2138 | 0 | Contact the dealer. |
-| P27 | Cooling coil temperature overheating protection | 2138 | 9 | Check that the fan is in good condition and that the evaporator fins are not in need of cleaning. |
-| P30 | Antifreeze cooling coil protection | 2137 | 4 | Unit antifreeze protection activated. Wait for conditions to improve or check for issues. |
-| PA | Tank temperature protection activated | 2137 | 14 | Contact the dealer. |
+| P01 | Water flow switch protection | @45 | 8 | Flow is too low or wiring is open circuit. Check the water system, water pump, and operation of water flow switch and correct problem. |
+| P02 | High pressure protection activated | @45 | 6 | 1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked or if evaporator fins are blocked impacting heat transfer efficiency. 3) Check whether snow or ice has built up too much inside the unit. 4) Check that the water tank temperature setting is not too high. |
+| P06 | Low pressure protection activated | @45 | 7 | 1) Check whether the unit is leaking refrigerant. 2) Repair and vacuum system, then refill with exact amount of refrigerant as per nameplate. |
+| P11 | Compressor discharge temperature too high | @45 | 5 | 1) Check water system is operating normal, look for reduction in normal water flow. 2) Check whether there was a refrigerant leak and repair. 3) Verify unit is in normal operation with proper exhaust temperature and system pressure. |
+| P15 | Inlet/outlet temperature difference too large | @45 | 13 | 1) Check if water system is operating abnormally, such as water flow is too low. 2) Verify unit is in normal operation with proper exhaust temperature and system pressure. |
+| P16 | Outlet water temperature too low protection | @45 | 14 | 1) Check water system is normal and water flow is adequate. 2) Verify unit is in normal operation with proper exhaust temperature and system pressure. |
+| P19 | AC current protection | @45 | 0 | Contact the dealer. |
+| P27 | Cooling coil temperature overheating protection | @45 | 9 | Check that the fan is in good condition and that the evaporator fins are not in need of cleaning. |
+| P30 | Antifreeze cooling coil protection | @44 | 4 | Unit antifreeze protection activated. Wait for conditions to improve or check for issues. |
+| PA | Tank temperature protection activated | @44 | 14 | Contact the dealer. |
 
 ### Compressor/Inverter Errors (r-Series)
 
 | Code | Description | Register | Bit | Resolution |
 |------|-------------|----------|-----|------------|
-| r01 | IPM module fault | 2137 | 13 | Contact the dealer. |
-| r02 | Compressor start fault | 2137 | 11 | Contact the dealer. |
-| r05 | IPM module temperature too high | 2138 | 4 | Contact the dealer. |
-| r06 | Compressor phase current protection | 2138 | 1 | This applies to 3-phase units where the phasing of the wires is incorrect and needs to be corrected. |
-| r10 | AC voltage too high or too low | 2137 | 15 | Contact the dealer. |
-| r11 | DC bus voltage protection | 2138 | 3 | Contact the dealer. |
-| r20 | Compressor protection | 2138 | 15 | Contact the dealer. |
+| r01 | IPM module fault | @44 | 13 | Contact the dealer. |
+| r02 | Compressor start fault | @44 | 11 | Contact the dealer. |
+| r05 | IPM module temperature too high | @45 | 4 | Contact the dealer. |
+| r06 | Compressor phase current protection | @45 | 1 | This applies to 3-phase units where the phasing of the wires is incorrect and needs to be corrected. |
+| r10 | AC voltage too high or too low | @44 | 15 | Contact the dealer. |
+| r11 | DC bus voltage protection | @45 | 3 | Contact the dealer. |
+| r20 | Compressor protection | @45 | 15 | Contact the dealer. |
 
 ### Fan/Motor Errors (F-Series)
 
 | Code | Description | Register | Bit | Resolution |
 |------|-------------|----------|-----|------------|
-| FA | DC fan motor protection | 2138 | 2 | Contact the dealer. |
+| FA | DC fan motor protection | @45 | 2 | Contact the dealer. |
 
 ### Pressure Errors (E/F-Series)
 
 | Code | Description | Register | Bit | Resolution |
 |------|-------------|----------|-----|------------|
-| EB | High pressure protection (pressure sensor) | 2138 | 6 | Check if the ambient temperature sensor is short circuit or disconnected. |
-| EC | EEV circuit low pressure protection | 2138 | 11 | 1) Check whether the unit is leaking refrigerant. 2) After leak repair and vacuum, refill with correct refrigerant amount per nameplate. |
-| ED | Low pressure protection (pressure sensor) | 2138 | 7 | Check if the ambient temperature sensor is short circuit or disconnected. |
-| FE | Startup differential pressure protection | 2138 | 15 | Contact the dealer. |
-| FF | Running differential protection | 2138 | 15 | Contact the dealer. |
+| EB | High pressure protection (pressure sensor) | @45 | 6 | Check if the ambient temperature sensor is short circuit or disconnected. |
+| EC | EEV circuit low pressure protection | @45 | 11 | 1) Check whether the unit is leaking refrigerant. 2) After leak repair and vacuum, refill with correct refrigerant amount per nameplate. |
+| ED | Low pressure protection (pressure sensor) | @45 | 7 | Check if the ambient temperature sensor is short circuit or disconnected. |
+| FE | Startup differential pressure protection | @45 | 15 | Contact the dealer. |
+| FF | Running differential protection | @45 | 15 | Contact the dealer. |
 
 ### Register Bit to Error Code Mapping
 
-#### Register 2134 - Error Code 1
+#### Register @41 - Error Code 1
 
 | Bit | Arctic Code | Description |
 |-----|-------------|-------------|
@@ -525,7 +530,7 @@ The heat pump displays error codes on the wired controller. These codes map to s
 | 3 | E20 | Water tank temperature sensor error |
 | 4-15 | - | Reserved |
 
-#### Register 2137 - Error Code 2
+#### Register @44 - Error Code 2
 
 | Bit | Arctic Code | Description |
 |-----|-------------|-------------|
@@ -546,7 +551,7 @@ The heat pump displays error codes on the wired controller. These codes map to s
 | 14 | PA | High outlet water temperature protection |
 | 15 | r10 | AC voltage protection |
 
-#### Register 2138 - Error Code 3
+#### Register @45 - Error Code 3
 
 | Bit | Arctic Code | Description |
 |-----|-------------|-------------|

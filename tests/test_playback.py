@@ -6,8 +6,8 @@ Replays a JSONL capture file against the simulator's REST API and verifies
 that every register written is actually readable with the expected value.
 
 Tests cover:
-  1. Holding registers (2000–2057) — set via bulk, readback verified
-  2. Input registers (2100–2138) — same, including STATUS_2 bit flags
+  1. Holding registers (@50–@107) — set via bulk, readback verified
+  2. Telemetry registers (@0–@49) — same, including STATUS_2 bit flags
   3. Simulation disable/enable — confirms STATUS_2 survives bulk write
      when simulation is off, and gets recomputed when re-enabled
   4. Single-value entries (fc:6) — mapped to single register write
@@ -41,11 +41,11 @@ DEFAULT_HOST = "arctic-sim.local"
 DEFAULT_PORT = 80
 DEFAULT_CAPTURE = "captures/example.jsonl"
 
-# Register ranges (must match register_map.h)
-HOLDING_BASE = 2000
-HOLDING_END = 2057
-INPUT_BASE = 2100
-INPUT_END = 2138
+# Register wire byte offsets (must match the served windows)
+HOLDING_BASE = 50
+HOLDING_END = 107
+INPUT_BASE = 0
+INPUT_END = 49
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ class SimClient:
         return r.json()
 
     def get_registers(self) -> dict:
-        """Return { "holding": { "2000": v, ... }, "input": { "2100": v, ... } }"""
+        """Return { "holding": { "50": v, ... }, "input": { "0": v, ... } }"""
         r = self.session.get(f"{self.base}/api/registers", timeout=self.timeout)
         r.raise_for_status()
         return r.json()
@@ -212,16 +212,16 @@ class TestRunner:
 
     def test_bulk_holding_registers(self):
         """Write a batch of holding registers and read each one back."""
-        print("\n[2] Bulk write → holding registers (2000–2007)")
+        print("\n[2] Bulk write → holding registers (@50–@57)")
         test_values = {
-            "2000": 1,     # UNIT_ON_OFF = ON
-            "2001": 2,     # WORKING_MODE = Fan Coil Heat
-            "2002": 12,    # COOLING_SETPOINT
-            "2003": 40,    # HEATING_SETPOINT
-            "2004": 50,    # HOT_WATER_SETPOINT
-            "2005": 3,     # COOLING_DELTA_T
-            "2006": 4,     # HEATING_DELTA_T
-            "2007": 6,     # HOT_WATER_DELTA_T
+            "50": 1,     # UNIT_ON_OFF = ON
+            "51": 2,     # WORKING_MODE = Fan Coil Heat
+            "52": 12,    # COOLING_SETPOINT
+            "53": 40,    # HEATING_SETPOINT
+            "54": 50,    # HOT_WATER_SETPOINT
+            "55": 3,     # COOLING_DELTA_T
+            "56": 4,     # HEATING_DELTA_T
+            "57": 6,     # HOT_WATER_DELTA_T
         }
         resp = self.client.bulk_set(test_values)
         self.assert_eq("updated count", len(test_values), resp.get("updated"))
@@ -240,14 +240,14 @@ class TestRunner:
         self.assert_eq("simulation disabled", False, resp.get("simulation"))
 
         test_values = {
-            "2100": 350,   # WATER_TANK_TEMP
-            "2102": 280,   # OUTLET_WATER_TEMP
-            "2103": 260,   # INLET_WATER_TEMP
-            "2110": 150,   # OUTDOOR_AMBIENT_TEMP
-            "2118": 55,    # COMPRESSOR_FREQ
-            "2119": 720,   # FAN_SPEED
-            "2120": 230,   # AC_VOLTAGE
-            "2135": 0x0933,  # STATUS_2 (specific bit pattern)
+            "7": 350,   # WATER_TANK_TEMP
+            "9": 280,   # OUTLET_WATER_TEMP
+            "10": 260,   # INLET_WATER_TEMP
+            "17": 150,   # OUTDOOR_AMBIENT_TEMP
+            "25": 55,    # COMPRESSOR_FREQ
+            "26": 720,   # FAN_SPEED
+            "27": 230,   # AC_VOLTAGE
+            "42": 0x0933,  # STATUS_2 (specific bit pattern)
         }
         resp = self.client.bulk_set(test_values)
         self.assert_eq("updated count", len(test_values), resp.get("updated"))
@@ -261,7 +261,7 @@ class TestRunner:
             self.assert_eq(f"register {addr_s}", expected, actual)
 
         # Decode STATUS_2 for readability
-        sts2 = self.client.get_register(2135)
+        sts2 = self.client.get_register(42)
         print(f"    STATUS_2 = 0x{sts2:04X} → {status2_bits(sts2)}")
 
         # Re-enable simulation
@@ -273,11 +273,11 @@ class TestRunner:
         print("\n[4] Simulation re-enable recomputes STATUS_2")
 
         # Set a known holding state: unit ON, floor heating
-        self.client.bulk_set({"2000": 1, "2001": 1})
+        self.client.bulk_set({"50": 1, "51": 1})
         time.sleep(0.1)
 
         # With simulation enabled, STATUS_2 should reflect unit on + floor heating
-        sts2 = self.client.get_register(2135)
+        sts2 = self.client.get_register(42)
         self.assert_true(
             f"UNIT_ON bit set (0x{sts2:04X})", bool(sts2 & 0x0001)
         )
@@ -297,19 +297,19 @@ class TestRunner:
 
         # Write a specific STATUS_2 value
         custom_sts2 = 0x092B  # arbitrary bit pattern
-        self.client.bulk_set({"2135": custom_sts2})
+        self.client.bulk_set({"42": custom_sts2})
         time.sleep(0.1)
 
-        actual = self.client.get_register(2135)
+        actual = self.client.get_register(42)
         self.assert_eq(
             f"STATUS_2 preserved (0x{custom_sts2:04X})", custom_sts2, actual
         )
 
         # Now also write holding registers — STATUS_2 should NOT change
-        self.client.bulk_set({"2000": 0, "2001": 0})  # unit off
+        self.client.bulk_set({"50": 0, "51": 0})  # unit off
         time.sleep(0.1)
 
-        actual = self.client.get_register(2135)
+        actual = self.client.get_register(42)
         self.assert_eq(
             f"STATUS_2 still preserved after holding write (0x{custom_sts2:04X})",
             custom_sts2,
@@ -322,12 +322,12 @@ class TestRunner:
         """fc:6 style entry — single register write and readback."""
         print("\n[6] Single register write (fc:6 style)")
 
-        self.client.set_register(2000, 1)
-        actual = self.client.get_register(2000)
+        self.client.set_register(50, 1)
+        actual = self.client.get_register(50)
         self.assert_eq("UNIT_ON_OFF = 1", 1, actual)
 
-        self.client.set_register(2003, 42)
-        actual = self.client.get_register(2003)
+        self.client.set_register(53, 42)
+        actual = self.client.get_register(53)
         self.assert_eq("HEATING_SETPOINT = 42", 42, actual)
 
     def test_capture_replay(self, capture_path: str):
@@ -380,7 +380,7 @@ class TestRunner:
                 if actual != expected:
                     self.failed += 1
                     extra = ""
-                    if addr == 2135:
+                    if addr == 42:
                         extra = (
                             f" bits: expected={status2_bits(expected)}"
                             f" actual={status2_bits(actual)}"
@@ -426,9 +426,9 @@ class TestRunner:
         ]
 
         for value, desc in patterns:
-            self.client.bulk_set({"2135": value})
+            self.client.bulk_set({"42": value})
             time.sleep(0.05)
-            actual = self.client.get_register(2135)
+            actual = self.client.get_register(42)
             self.assert_eq(
                 f"STATUS_2 0x{value:04X} ({desc})", value, actual
             )
@@ -444,13 +444,13 @@ class TestRunner:
         self.client.set_simulation(False)
 
         mixed = {
-            "2000": 1,      # holding: UNIT_ON_OFF
-            "2001": 6,      # holding: WORKING_MODE = Auto
-            "2003": 45,     # holding: HEATING_SETPOINT
-            "2100": 400,    # input: WATER_TANK_TEMP
-            "2110": 100,    # input: OUTDOOR_AMBIENT_TEMP
-            "2118": 60,     # input: COMPRESSOR_FREQ
-            "2135": 0x0933, # input: STATUS_2
+            "50": 1,      # holding: UNIT_ON_OFF
+            "51": 6,      # holding: WORKING_MODE = Auto
+            "53": 45,     # holding: HEATING_SETPOINT
+            "7": 400,    # input: WATER_TANK_TEMP
+            "17": 100,    # input: OUTDOOR_AMBIENT_TEMP
+            "25": 60,     # input: COMPRESSOR_FREQ
+            "42": 0x0933, # input: STATUS_2
         }
         resp = self.client.bulk_set(mixed)
         self.assert_eq("updated count", len(mixed), resp.get("updated"))

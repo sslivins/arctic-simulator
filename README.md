@@ -120,11 +120,11 @@ GET  /api/commands               # Recent fc=0x06 writes received from the contr
 
 ```
 GET  /api/registers              # All served register values, grouped by window
-GET  /api/registers?addr=2100    # Single register
-PUT  /api/registers?addr=2110    # Set single register (low byte stored)
+GET  /api/registers?addr=7       # Single register (wire byte offset)
+PUT  /api/registers?addr=17      # Set single register (low byte stored)
      Body: { "value": 35 }
 POST /api/registers/bulk         # Set multiple registers
-     Body: { "registers": { "2100": 35, "2110": 20 } }
+     Body: { "registers": { "7": 35, "17": 20 } }
 POST /api/errors/clear           # Legacy alias of /api/faults/clear
 POST /api/reboot                 # Reboot the device
 ```
@@ -146,9 +146,9 @@ GET  /api/playback/status        # Playback state and position
 One JSON object per line. Each entry represents a register snapshot at a point in time.
 
 ```jsonl
-{"t":0,"fc":3,"addr":2100,"count":39,"values":[200,0,250,250,250,30,0,20,0,0,50,0,0,0,250,0,0,0,55,200,12,8,1,0,200,0,250,80,1,0,0,0,0,0,0,33,0,0,0]}
-{"t":500,"fc":3,"addr":2000,"count":58,"values":[1,1,70,450,550,50,50,50,50,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,250,200,0,0,0,0,37,38,0,0,0,43,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
-{"t":1000,"fc":6,"addr":2000,"value":1}
+{"t":0,"fc":3,"addr":7,"count":39,"values":[200,0,250,250,250,30,0,20,0,0,50,0,0,0,250,0,0,0,55,200,12,8,1,0,200,0,250,80,1,0,0,0,0,0,0,33,0,0,0]}
+{"t":500,"fc":3,"addr":50,"count":58,"values":[1,1,70,450,550,50,50,50,50,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,250,200,0,0,0,0,37,38,0,0,0,43,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+{"t":1000,"fc":6,"addr":50,"value":1}
 ```
 
 Fields:
@@ -167,8 +167,8 @@ and shared with the controller and sniffer.
 
 The unit exposes two register windows on the Tuya/Macon wire:
 
-- **Holding** window (wire `addr=50`): regs **2000-2057**.
-- **Telemetry** window (wire `addr=0`): regs **2093-2142**.
+- **Holding** window (wire `addr=50`): offsets **@50-@107**.
+- **Telemetry** window (wire `addr=0`): offsets **@0-@49**.
 
 At boot the store is seeded with payloads captured from a real Macon mainboard
 (2026-05-03), so bytes the library doesn't name still match the real unit, and

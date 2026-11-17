@@ -7,9 +7,9 @@
  *   (semantic API — see semantic_api.h: /api/fields, /api/state,
  *    /api/faults[/catalog|/clear], /api/lease)
  *   GET  /api/registers             — All register values (raw, debug only)
- *   GET  /api/registers?addr=XXXX   — Single register
- *   PUT  /api/registers?addr=XXXX   — Set single register { "value": N }
- *   POST /api/registers/bulk        — Set multiple registers { "registers": { "2100": 350, ... } }
+ *   GET  /api/registers?addr=N      — Single register (N = wire byte offset)
+ *   PUT  /api/registers?addr=N      — Set single register { "value": V }
+ *   POST /api/registers/bulk        — Set multiple registers { "registers": { "39": 35, ... } }
  *   POST /api/preset                — Load preset { "name": "heating" }
  *   POST /api/errors/clear          — Clear all error flags
  *   POST /api/capture/arm           — Start recording raw RX bytes (reverse-eng)
@@ -222,11 +222,22 @@ static esp_err_t handleGetStatus(httpd_req_t* req) {
 // GET /api/registers
 // ============================================================================
 
+// Parse a register address (wire byte offset). Strict, because @0 is a real
+// register: atoi() would map a malformed key to it.
+static bool parseAddr(const char* s, uint16_t* out) {
+    if (!s || *s < '0' || *s > '9') return false;
+    char* end = nullptr;
+    const unsigned long v = strtoul(s, &end, 10);
+    if (*end != '\0' || v > 0xFFFF) return false;
+    *out = (uint16_t)v;
+    return true;
+}
+
 // Which served window carries a register ("input" = telemetry, "holding").
 static const char* windowName(uint16_t addr) {
     for (size_t w = 0; w < tuya_codec::KNOWN_WINDOWS_COUNT; ++w) {
         const auto& win = tuya_codec::KNOWN_WINDOWS[w];
-        if (addr >= win.reg_base && addr < win.reg_base + (win.field_b - win.prefix_len)) {
+        if (addr >= win.field_a && addr < win.field_a + (win.field_b - win.prefix_len)) {
             return win.field_a == 0 ? "input" : "holding";
         }
     }
@@ -239,8 +250,8 @@ static esp_err_t handleGetRegisters(httpd_req_t* req) {
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
         char addr_str[8] = {};
         if (httpd_query_key_value(query, "addr", addr_str, sizeof(addr_str)) == ESP_OK) {
-            uint16_t addr = (uint16_t)atoi(addr_str);
-            if (!reg::isValid(addr)) {
+            uint16_t addr = 0;
+            if (!parseAddr(addr_str, &addr) || !reg::isValid(addr)) {
                 return sendError(req, 404, "Invalid register address");
             }
             cJSON* json = cJSON_CreateObject();
@@ -259,8 +270,8 @@ static esp_err_t handleGetRegisters(httpd_req_t* req) {
         const uint16_t n = (uint16_t)(win.field_b - win.prefix_len);
         for (uint16_t i = 0; i < n; i++) {
             char key[8];
-            snprintf(key, sizeof(key), "%u", (unsigned)(win.reg_base + i));
-            cJSON_AddNumberToObject(grp, key, reg::get((uint16_t)(win.reg_base + i)));
+            snprintf(key, sizeof(key), "%u", (unsigned)(win.field_a + i));
+            cJSON_AddNumberToObject(grp, key, reg::get((uint16_t)(win.field_a + i)));
         }
     }
 
@@ -268,7 +279,7 @@ static esp_err_t handleGetRegisters(httpd_req_t* req) {
 }
 
 // ============================================================================
-// PUT /api/registers?addr=XXXX  — body: { "value": N }
+// PUT /api/registers?addr=N  — body: { "value": N }
 // ============================================================================
 
 static esp_err_t handlePutRegister(httpd_req_t* req) {
@@ -280,8 +291,8 @@ static esp_err_t handlePutRegister(httpd_req_t* req) {
     if (httpd_query_key_value(query, "addr", addr_str, sizeof(addr_str)) != ESP_OK) {
         return sendError(req, 400, "Missing ?addr= parameter");
     }
-    uint16_t addr = (uint16_t)atoi(addr_str);
-    if (!reg::isValid(addr)) {
+    uint16_t addr = 0;
+    if (!parseAddr(addr_str, &addr) || !reg::isValid(addr)) {
         return sendError(req, 404, "Invalid register address");
     }
 
@@ -311,7 +322,7 @@ static esp_err_t handlePutRegister(httpd_req_t* req) {
 }
 
 // ============================================================================
-// POST /api/registers/bulk  — body: { "registers": { "2100": 350, ... } }
+// POST /api/registers/bulk  — body: { "registers": { "39": 35, ... } }
 // ============================================================================
 
 static esp_err_t handleBulkSet(httpd_req_t* req) {
@@ -331,8 +342,8 @@ static esp_err_t handleBulkSet(httpd_req_t* req) {
     int count = 0;
     cJSON* item;
     cJSON_ArrayForEach(item, regs) {
-        uint16_t addr = (uint16_t)atoi(item->string);
-        if (reg::isValid(addr) && cJSON_IsNumber(item)) {
+        uint16_t addr = 0;
+        if (parseAddr(item->string, &addr) && reg::isValid(addr) && cJSON_IsNumber(item)) {
             reg::set(addr, (uint16_t)item->valueint);
             count++;
         }
@@ -602,11 +613,11 @@ static void streamTask(void* /*arg*/) {
                 const uint16_t n = (uint16_t)(win.field_b - win.prefix_len);
                 pos = snprintf(line, sizeof(line),
                     "data: {\"t\":%lu,\"fc\":3,\"addr\":%u,\"count\":%u,\"values\":[",
-                    (unsigned long)t_ms, (unsigned)win.reg_base, (unsigned)n);
+                    (unsigned long)t_ms, (unsigned)win.field_a, (unsigned)n);
                 for (uint16_t i = 0; i < n && pos < (int)sizeof(line) - 10; i++) {
                     if (i > 0) line[pos++] = ',';
                     pos += snprintf(line + pos, sizeof(line) - pos, "%u",
-                                    reg::get((uint16_t)(win.reg_base + i)));
+                                    reg::get((uint16_t)(win.field_a + i)));
                 }
                 pos += snprintf(line + pos, sizeof(line) - pos, "]}\n\n");
                 ok = httpd_socket_send(hd, fd, line, (size_t)pos, 0) >= 0;

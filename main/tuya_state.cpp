@@ -68,17 +68,18 @@ const tuya_codec::RegWindow *windowByA(uint16_t field_a) {
     return nullptr;
 }
 
-// Register served at payload `offset` of `win`, or 0 for a prefix byte.
+// Register (wire offset) served at payload `offset` of `win`, or
+// MACON_NO_ADDRESS for a prefix byte.
 uint16_t regAt(const tuya_codec::RegWindow &win, size_t offset) {
-    if (offset < win.prefix_len) return 0;
-    return static_cast<uint16_t>(win.reg_base + (offset - win.prefix_len));
+    if (offset < win.prefix_len) return arctic::MACON_NO_ADDRESS;
+    return static_cast<uint16_t>(win.field_a + (offset - win.prefix_len));
 }
 
 bool servedLocked(uint16_t reg) {
     for (size_t i = 0; i < tuya_codec::KNOWN_WINDOWS_COUNT; ++i) {
         const auto &w = tuya_codec::KNOWN_WINDOWS[i];
         const uint16_t n = static_cast<uint16_t>(w.field_b - w.prefix_len);
-        if (reg >= w.reg_base && reg < w.reg_base + n) return true;
+        if (reg >= w.field_a && reg < w.field_a + n) return true;
     }
     return false;
 }
@@ -129,7 +130,7 @@ uint8_t getByte(uint16_t field_a, size_t offset) {
     if (!s_initialized || !w || offset >= w->field_b) return 0;
     uint16_t v = 0;
     const uint16_t reg = regAt(*w, offset);
-    return (reg && s_image.get_register(reg, &v)) ? static_cast<uint8_t>(v) : 0;
+    return (reg != arctic::MACON_NO_ADDRESS && s_image.get_register(reg, &v)) ? static_cast<uint8_t>(v) : 0;
 }
 
 bool writeWindow(uint16_t field_a, uint16_t field_b,
@@ -138,7 +139,7 @@ bool writeWindow(uint16_t field_a, uint16_t field_b,
     Guard g(mutex());
     const tuya_codec::RegWindow *w = tuya_codec::find_window(field_a, field_b);
     if (!s_initialized || !w) return false;
-    s_image.ingest_bytes(w->reg_base, payload + w->prefix_len, field_b - w->prefix_len);
+    s_image.ingest_bytes(w->field_a, payload + w->prefix_len, field_b - w->prefix_len);
     bump();
     return true;
 }
@@ -148,7 +149,7 @@ bool setByte(uint16_t field_a, size_t offset, uint8_t value) {
     const tuya_codec::RegWindow *w = windowByA(field_a);
     if (!s_initialized || !w || offset >= w->field_b) return false;
     const uint16_t reg = regAt(*w, offset);
-    if (reg == 0) return true;   // static prefix byte: nothing to store
+    if (reg == arctic::MACON_NO_ADDRESS) return true;   // static prefix byte: nothing to store
     const bool ok = s_image.set_register(reg, value);
     if (ok) bump();
     return ok;

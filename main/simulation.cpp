@@ -3,7 +3,7 @@
  *
  * On the ECO-600 this derived the 16-bit STATUS_2 bitmap from the commanded
  * unit-on/working-mode holding registers. The Macon layout has no such
- * command registers — status is a single byte (reg 2130) that presets and the
+ * command registers — status is a single byte (@37) that presets and the
  * REST API set directly — so there is nothing to reactively derive. The
  * enable/disable API is retained for compatibility; updateStatus() is a no-op.
  */
@@ -27,7 +27,7 @@ void setEnabled(bool enabled) {
 bool isEnabled() { return s_enabled; }
 
 void updateStatus() {
-    // No reactive derivation on the Macon layout — status byte (reg 2130) is
+    // No reactive derivation on the Macon layout — status byte (@37) is
     // authored directly via presets / the REST API.
 }
 

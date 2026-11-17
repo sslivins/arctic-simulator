@@ -81,8 +81,8 @@ stand-in for the real heat pump during development and integration testing of th
   `%lld` for `int64_t`. Always cast to `(long)` and use `%ld`, or `(unsigned long)`
   and use `%lu`.
 - Namespaces: `reg::`, `tuya_slave::`, `api::`, `playback::`, `wifi::`
-- Register addresses use the protocol's native numbering (2000–2142), not zero-based
-  offsets.
+- Register addresses are wire byte offsets (`@N`): telemetry @0–@49, holding
+  @50–@107 (the library's `addr`). The legacy Modbus 20xx numbering is gone.
 - **Never add register numbers, bit masks or scalings to the simulator.** The
   arctic-macon library (`components/arctic-macon`) is the single source of truth;
   use `macon_fields.h` (named fields) / `macon_faults.h` and extend the library
@@ -95,9 +95,9 @@ stand-in for the real heat pump during development and integration testing of th
 - Endpoints:
   - `GET /api/status` — simulator info + Modbus stats + playback state
   - `GET /api/registers` — all registers
-  - `GET /api/registers?addr=XXXX` — single register
-  - `PUT /api/registers?addr=XXXX` — set register `{ "value": N }`
-  - `POST /api/registers/bulk` — set multiple `{ "registers": { "2100": 350 } }`
+  - `GET /api/registers?addr=N` — single register (N = wire byte offset)
+  - `PUT /api/registers?addr=N` — set register `{ "value": N }`
+  - `POST /api/registers/bulk` — set multiple `{ "registers": { "7": 35 } }`
   - `POST /api/preset` — load preset `{ "name": "heating" }`
   - `POST /api/errors/clear` — clear error flags
   - `POST /api/reboot` — reboot the device
@@ -109,12 +109,12 @@ stand-in for the real heat pump during development and integration testing of th
 ### Capture File Format (JSONL)
 One JSON object per line:
 ```jsonl
-{"t":0,"fc":3,"addr":2100,"count":39,"values":[...]}
-{"t":500,"fc":6,"addr":2000,"value":1}
+{"t":0,"fc":3,"addr":7,"count":39,"values":[...]}
+{"t":500,"fc":6,"addr":50,"value":1}
 ```
 - `t` — milliseconds since capture start
 - `fc` — function code (3=read holding, 6=write single)
-- `addr` — starting register address
+- `addr` — starting register (wire byte offset)
 - `count`/`values` — multi-register data
 - `value` — single-register write
 

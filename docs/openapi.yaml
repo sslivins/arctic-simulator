@@ -9,7 +9,7 @@ info:
     protocol specification (no scaling documented). Negative temperature
     encoding is TBD pending real device captures.
 
-    DC voltage (reg 2122) uses ÷10, pressure (regs 2126-2127) uses ÷100,
+    DC voltage (@29) uses ÷10, pressure (@33-@34) uses ÷100,
     as documented in the protocol.
   version: 0.3.0
   contact:
@@ -77,22 +77,23 @@ paths:
       description: |
         Without `addr` parameter: returns all holding and input registers.
         With `addr` parameter: returns a single register value.
+        Registers are addressed by their wire byte offset `@N`.
 
         Register types:
-        - **Holding (2000–2057)**: Commands written by the Modbus master (controller).
+        - **Holding (@50–@107)**: Commands written by the Modbus master (controller).
           Read-only from the heat pump's perspective.
-        - **Input (2100–2138)**: Status reported by the heat pump. Writable via this
+        - **Input / telemetry (@0–@49)**: Status reported by the heat pump. Writable via this
           API to simulate sensor readings, operating state, and error conditions.
       operationId: getRegisters
       parameters:
         - name: addr
           in: query
           required: false
-          description: Register address (2000–2057 for holding, 2100–2138 for input)
+          description: Register wire byte offset (50–107 for holding, 0–49 for input/telemetry)
           schema:
             type: integer
-            minimum: 2000
-            maximum: 2138
+            minimum: 0
+            maximum: 107
       responses:
         "200":
           description: Register value(s)
@@ -116,20 +117,20 @@ paths:
         Write a value to a register by address. Any register (holding or input)
         can be written for simulation purposes.
 
-        - Writing an **input register** (2100–2138) changes the simulated heat pump
+        - Writing an **input register** (@0–@49) changes the simulated heat pump
           status (temperatures, operating flags, error codes).
-        - Writing a **holding register** (2000–2057) simulates a controller command
+        - Writing a **holding register** (@50–@107) simulates a controller command
           and triggers the simulation engine to update related input registers.
       operationId: putRegister
       parameters:
         - name: addr
           in: query
           required: true
-          description: Register address to write
+          description: Register wire byte offset to write
           schema:
             type: integer
-            minimum: 2000
-            maximum: 2138
+            minimum: 0
+            maximum: 107
       requestBody:
         required: true
         content:
@@ -217,7 +218,7 @@ paths:
     post:
       tags: [Errors]
       summary: Clear all error flags
-      description: Resets error registers 2134, 2137, and 2138 to zero.
+      description: Resets error registers @41, @44, and @45 to zero.
       operationId: clearErrors
       responses:
         "200":
@@ -265,8 +266,8 @@ paths:
               type: string
               description: JSONL capture data
               example: |
-                {"t":0,"fc":3,"addr":2100,"count":39,"values":[200,0,250,250,0,0,0,0,0,0,200,0,0,0,0,0,0,0,0,0,230,0,3200,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0]}
-                {"t":500,"fc":6,"addr":2000,"value":1}
+                {"t":0,"fc":3,"addr":7,"count":39,"values":[200,0,250,250,0,0,0,0,0,0,200,0,0,0,0,0,0,0,0,0,230,0,3200,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0]}
+                {"t":500,"fc":6,"addr":50,"value":1}
       responses:
         "200":
           description: Capture loaded
@@ -392,7 +393,7 @@ components:
       properties:
         addr:
           type: integer
-          example: 2100
+          example: 7
         value:
           type: integer
           example: 35
@@ -407,23 +408,23 @@ components:
       properties:
         holding:
           type: object
-          description: Holding register values keyed by address (2000–2057)
+          description: Holding register values keyed by wire byte offset (50–107)
           additionalProperties:
             type: integer
           example:
-            "2000": 0
-            "2001": 1
-            "2002": 70
-            "2003": 45
+            "50": 0
+            "51": 1
+            "52": 70
+            "53": 45
         input:
           type: object
-          description: Input register values keyed by address (2100–2138)
+          description: Input register values keyed by wire byte offset (0–49)
           additionalProperties:
             type: integer
           example:
-            "2100": 45
-            "2102": 35
-            "2110": 20
+            "7": 45
+            "9": 35
+            "17": 20
 
     SetRegisterRequest:
       type: object
@@ -442,15 +443,15 @@ components:
       properties:
         registers:
           type: object
-          description: Map of register address to value
+          description: Map of register wire byte offset to value
           additionalProperties:
             type: integer
       required: [registers]
       example:
         registers:
-          "2100": 35
-          "2110": 20
-          "2118": 55
+          "7": 35
+          "17": 20
+          "25": 55
 
     BulkSetResponse:
       type: object
@@ -665,7 +666,7 @@ components:
         errors:
           type: array
           description: |
-            List of active error names decoded from registers 2134, 2137, 2138.
+            List of active error names decoded from registers @41, @44, @45.
             Empty when has_errors is false.
           items:
             type: string

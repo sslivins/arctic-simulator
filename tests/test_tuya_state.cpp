@@ -118,45 +118,42 @@ void test_projection_telemetry_window() {
     tuya_state::resetForTest();
     tuya_state::init();
 
-    // Telemetry: field_a=0, field_b=50, reg_base=2093, prefix=0.
-    // reg 2093 maps to byte 0; reg 2100 maps to byte 7 of the window.
-    CHECK(tuya_state::projectKnows(2093));
-    CHECK(tuya_state::projectKnows(2100));
-    CHECK(tuya_state::projectKnows(2142));   // 2093 + 50 - 1 = 2142
-    CHECK(!tuya_state::projectKnows(2092));
-    CHECK(!tuya_state::projectKnows(2143));
+    // Telemetry: field_a=0, field_b=50, prefix=0. Offset @N is byte N.
+    CHECK(tuya_state::projectKnows(0));
+    CHECK(tuya_state::projectKnows(7));
+    CHECK(tuya_state::projectKnows(49));
 
-    CHECK(tuya_state::projectSet(2093, 0x0A));
-    CHECK(tuya_state::projectGet(2093) == 0x0A);
+    CHECK(tuya_state::projectSet(0, 0x0A));
+    CHECK(tuya_state::projectGet(0) == 0x0A);
     CHECK(tuya_state::getByte(0, 0) == 0x0A);
 
-    CHECK(tuya_state::projectSet(2100, 0x37));
-    CHECK(tuya_state::projectGet(2100) == 0x37);
+    CHECK(tuya_state::projectSet(7, 0x37));
+    CHECK(tuya_state::projectGet(7) == 0x37);
     CHECK(tuya_state::getByte(0, 7) == 0x37);
 
-    CHECK(tuya_state::projectSet(2110, 20));
-    CHECK(tuya_state::projectGet(2110) == 20);
-    CHECK(tuya_state::getByte(0, 17) == 20);  // 2110 - 2093
+    CHECK(tuya_state::projectSet(49, 20));
+    CHECK(tuya_state::projectGet(49) == 20);
+    CHECK(tuya_state::getByte(0, 49) == 20);
 }
 
 void test_projection_holding_window() {
     tuya_state::resetForTest();
     tuya_state::init();
 
-    // Holding: field_a=50, field_b=58, reg_base=2000, prefix=0.
-    CHECK(tuya_state::projectKnows(2000));
-    CHECK(tuya_state::projectKnows(2057));
-    CHECK(!tuya_state::projectKnows(2058));
+    // Holding: field_a=50, field_b=58, prefix=0. Offset @50+i is byte i.
+    CHECK(tuya_state::projectKnows(50));
+    CHECK(tuya_state::projectKnows(107));
+    CHECK(!tuya_state::projectKnows(108));
 
-    CHECK(tuya_state::projectSet(2000, 0xAB));
+    CHECK(tuya_state::projectSet(50, 0xAB));
     CHECK(tuya_state::getByte(50, 0) == 0xAB);
 
-    CHECK(tuya_state::projectSet(2057, 0xCD));
+    CHECK(tuya_state::projectSet(107, 0xCD));
     CHECK(tuya_state::getByte(50, 57) == 0xCD);
 
     // Low-byte-only behaviour: high bits are discarded.
-    CHECK(tuya_state::projectSet(2010, 0x1234));
-    CHECK(tuya_state::projectGet(2010) == 0x34);
+    CHECK(tuya_state::projectSet(60, 0x1234));
+    CHECK(tuya_state::projectGet(60) == 0x34);
 }
 
 void test_projection_unknown_register() {
