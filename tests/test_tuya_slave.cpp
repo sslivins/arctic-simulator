@@ -74,7 +74,7 @@ void test_unknown_window_unreachable_via_seam() {
 
 void test_telemetry_response_byte_exact() {
     reset();
-    // Seed bytes [0..6] (regs 2093..2099) + bytes [7..49] (regs 2100..2142).
+    // Seed bytes [0..6] (@0..@6) + bytes [7..49] (@7..@49).
     uint8_t payload[50];
     for (size_t i = 0; i < 50; ++i) payload[i] = (uint8_t)(0x10 + i);
     CHECK(tuya_state::writeWindow(WIN_TEL_A, WIN_TEL_B, payload, 50));
@@ -234,7 +234,7 @@ void test_response_buffer_too_small() {
 
 // An fc=0x06 setpoint write ("55 AA F0 06 0000 0001 <°C> <chk>", 10 bytes)
 // carries one inline data byte. The handler must read the full frame, reflect
-// the value into telemetry byte0 (reg2093), and ACK it.
+// the value into telemetry byte0 (@0), and ACK it.
 void test_command_setpoint_write_reflects() {
     reset();
 
@@ -252,7 +252,7 @@ void test_command_setpoint_write_reflects() {
     // Whole command frame consumed (not under-read as the old fixed-9 assumed).
     CHECK(consumed == cmd_len);
 
-    // Setpoint reflected onto the wire at telemetry byte0 = reg2093.
+    // Setpoint reflected onto the wire at telemetry byte0 = @0.
     CHECK(tuya_state::getByte(0, 0) == new_setpoint);
 
     // A 9-byte command ACK was emitted.
@@ -267,7 +267,7 @@ void test_command_setpoint_write_reflects() {
     CHECK(s.parse_errors == 0);
 }
 
-// A working-mode write lands at wire addr 0x0003 (telemetry byte3 = reg2096),
+// A working-mode write lands at wire addr 0x0003 (telemetry byte3 = @3),
 // not byte0: the handler must reflect it at its offset within the window.
 void test_command_mode_write_reflects_at_offset() {
     reset();

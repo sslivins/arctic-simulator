@@ -27,7 +27,7 @@ namespace playback {
 struct Entry {
     int64_t  timestamp_ms;  // Milliseconds (epoch or relative — base is subtracted at playback)
     bool     is_raw;        // True for sniffer raw lines (apply via tuya_state::writeWindow)
-    uint16_t addr;          // Legacy: starting register address; raw: field_a
+    uint16_t addr;          // Legacy: starting wire byte offset; raw: field_a
     uint16_t count;         // Legacy: number of registers; raw: field_b (payload byte count)
     uint16_t* values;       // Legacy register values (null for raw entries)
     uint8_t*  bytes;        // Raw payload bytes (null for legacy entries)

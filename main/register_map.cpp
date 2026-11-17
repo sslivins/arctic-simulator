@@ -53,7 +53,7 @@ constexpr int32_t DIR_HEATING  = static_cast<int32_t>(MaconMode::Heating);
 constexpr int32_t DIR_COOLING  = static_cast<int32_t>(MaconMode::Cooling);
 
 // Every preset starts from this fully-specified "idle, powered, no faults" state
-// (unit enabled, matching the OEM idle capture where reg2007 = 0x20)
+// (unit enabled, matching the OEM idle capture where @57 = 0x20)
 // so no value leaks from the previous preset or a controller write.
 const FieldValue kCommon[] = {
     {"unit_on", 1}, {"fan_on", 0}, {"pump_on", 0}, {"cooling_on", 0},
@@ -145,8 +145,8 @@ void applyFields(MaconImage &img, const FieldValue *fv, size_t n) {
 void seedOemBaseline(MaconImage &img) {
     const tuya_codec::RegWindow *h = tuya_codec::find_window(50, sizeof(kOemHolding));
     const tuya_codec::RegWindow *t = tuya_codec::find_window(0, sizeof(kOemTelemetry));
-    if (h) img.ingest_bytes(h->reg_base, kOemHolding + h->prefix_len, sizeof(kOemHolding) - h->prefix_len);
-    if (t) img.ingest_bytes(t->reg_base, kOemTelemetry + t->prefix_len, sizeof(kOemTelemetry) - t->prefix_len);
+    if (h) img.ingest_bytes(h->field_a, kOemHolding + h->prefix_len, sizeof(kOemHolding) - h->prefix_len);
+    if (t) img.ingest_bytes(t->field_a, kOemTelemetry + t->prefix_len, sizeof(kOemTelemetry) - t->prefix_len);
 }
 
 }  // namespace

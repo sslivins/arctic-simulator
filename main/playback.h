@@ -7,10 +7,10 @@
  * the engine subtracts the first entry's timestamp automatically so both
  * formats produce correct relative timing.
  *
- * Capture format (JSONL — one JSON object per line):
- *   {"t":1773535127116,"fc":3,"addr":2100,"count":39,"values":[...]}
- *   {"t":1773535127618,"fc":3,"addr":2000,"count":58,"values":[...]}
- *   {"t":1773535128116,"fc":6,"addr":2000,"value":1}
+ * Capture format (JSONL — one JSON object per line; "addr" is the wire byte offset):
+ *   {"t":1773535127116,"fc":3,"addr":7,"count":39,"values":[...]}
+ *   {"t":1773535127618,"fc":3,"addr":50,"count":58,"values":[...]}
+ *   {"t":1773535128116,"fc":6,"addr":50,"value":1}
  */
 #pragma once
 
